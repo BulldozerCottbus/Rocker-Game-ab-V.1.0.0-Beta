@@ -121,14 +121,27 @@ nav button{background:#222;font-size:14px}
 /* ================= BASIS ================= */
 const SAVE_KEY="rocker_empire_fixed";
 
-/* Regionen – ganz Deutschland (Besitz NUR Liga 1) */
+/* Regionen + feste Liga-1-Besitzer */
 const REGIONS=[
-  "Berlin","Brandenburg","Hamburg","Niedersachsen","NRW","Hessen",
-  "Sachsen","Bayern","Baden-Württemberg","Mecklenburg-Vorpommern",
-  "Schleswig-Holstein","Thüringen","Sachsen-Anhalt"
+  {name:"Berlin", owner:"Hells Angels MC"},
+  {name:"Brandenburg", owner:"Hells Angels MC"},
+  {name:"Sachsen", owner:"Hells Angels MC"},
+
+  {name:"Hamburg", owner:"Bandidos MC"},
+  {name:"Niedersachsen", owner:"Bandidos MC"},
+  {name:"Schleswig-Holstein", owner:"Bandidos MC"},
+
+  {name:"NRW", owner:"Outlaws MC"},
+  {name:"Hessen", owner:"Outlaws MC"},
+
+  {name:"Bayern", owner:"Pagans MC"},
+  {name:"Baden-Württemberg", owner:"Pagans MC"},
+
+  {name:"Thüringen", owner:"Sons of Silence"},
+  {name:"Sachsen-Anhalt", owner:"Sons of Silence"},
+  {name:"Mecklenburg-Vorpommern", owner:"Sons of Silence"}
 ];
 
-/* Liga-3 Supporter (spielbar) */
 const LIGA3_MCS=[
   "Bulldozer Cottbus",
   "Red Devils Support",
@@ -155,10 +168,7 @@ function tab(id){
 
 /* ================= SAVE ================= */
 function save(){ localStorage.setItem(SAVE_KEY, JSON.stringify(state)); }
-function load(){
-  const d=localStorage.getItem(SAVE_KEY);
-  if(d){ state=JSON.parse(d); }
-}
+function load(){ const d=localStorage.getItem(SAVE_KEY); if(d) state=JSON.parse(d); }
 
 /* ================= SETTINGS ================= */
 function applySettings(){
@@ -226,7 +236,12 @@ function renderGame(){
   map.innerHTML="";
   if(p.liga>=3){
     REGIONS.forEach(r=>{
-      map.innerHTML+=`<div class="region">${r}<br>Besitzer: Liga-1-MC</div>`;
+      map.innerHTML+=`
+        <div class="region">
+          <strong>${r.name}</strong><br>
+          Besitzer: ${r.owner}
+        </div>
+      `;
     });
   }else{
     map.innerHTML=`<div class="card small">Regionen ab Liga 3 sichtbar</div>`;
@@ -234,12 +249,12 @@ function renderGame(){
 
   market.innerHTML=`
     <div class="card ${p.influence<50?'locked':''}">
-      🔫 Waffenmarkt (sichtbar ab Liga 3)<br>
+      🔫 Waffenmarkt<br>
       <button onclick="buyWeapon()">Waffe kaufen (1000 €)</button>
       <div class="small">${p.influence>=50?"Zugang möglich":"Kein Zugang – Einfluss < 50%"}</div>
     </div>
-    ${p.liga>=3?'<div class="card">🌿 Biologische Drogen (ab Liga 3)</div>':''}
-    ${p.liga>=2?'<div class="card">🧪 Chemische Drogen (ab Liga 2)</div>':''}
+    ${p.liga>=3?'<div class="card">🌿 Biologische Drogen</div>':''}
+    ${p.liga>=2?'<div class="card">🧪 Chemische Drogen</div>':''}
   `;
 
   war.innerHTML=`
