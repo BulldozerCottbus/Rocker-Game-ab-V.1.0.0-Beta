@@ -1,24 +1,20 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Rocker Empire</title>
 
 <style>
 :root{
-  --bg:#0e0e0e;
-  --card:#1a1a1a;
-  --accent:#b30000;
-  --muted:#9aa0a6;
-  --radius:14px;
+  --bg:#0e0e0e; --card:#1a1a1a; --accent:#b30000; --muted:#9aa0a6; --radius:14px;
 }
 *{box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial}
 body{margin:0;background:var(--bg);color:#fff}
 .screen{display:none;padding:16px}
 .screen.active{display:block}
 h1,h2,h3{text-align:center;margin:10px 0}
-button{width:100%;padding:14px;margin:8px 0;background:var(--accent);color:#fff;border:none;border-radius:var(--radius)}
+button{width:100%;padding:14px;margin:8px 0;background:var(--accent);color:#fff;border:0;border-radius:var(--radius);font-size:16px}
 button.secondary{background:#333}
 .card{background:var(--card);padding:14px;border-radius:var(--radius);margin-bottom:12px}
 nav{display:flex;gap:6px;justify-content:space-around;background:#111;position:sticky;top:0;padding:6px}
@@ -26,10 +22,20 @@ nav button{background:#222;font-size:14px}
 .small{color:var(--muted);font-size:13px}
 .region{border:1px solid #2a2a2a;padding:12px;border-radius:12px;margin-bottom:10px}
 .locked{opacity:.5}
+.hidden{display:none}
+
+/* Grafik */
+.low *{filter:none}
+.medium *{filter:saturate(1.05)}
+.high *{filter:saturate(1.15) contrast(1.05)}
+
+/* Input */
+.touch button{padding:18px}
+.pc button{padding:10px}
 </style>
 </head>
 
-<body>
+<body class="touch medium">
 
 <!-- START -->
 <section id="start" class="screen active">
@@ -53,7 +59,7 @@ nav button{background:#222;font-size:14px}
     <input id="nameInput" placeholder="Name (nur Liga 4)">
     <select id="ligaInput" onchange="updateCreateUI()">
       <option value="4">Liga 4 – Eigener Weg</option>
-      <option value="3">Liga 3 – Supporter-Club</option>
+      <option value="3">Liga 3 – Supporter</option>
     </select>
     <select id="mcSelect" class="hidden"></select>
     <button onclick="createChar()">Erstellen</button>
@@ -81,11 +87,63 @@ nav button{background:#222;font-size:14px}
 <!-- SETTINGS -->
 <section id="settings" class="screen">
   <h2>Einstellungen</h2>
+
+  <div class="card">
+    <h3>🎵 Musik</h3>
+    <select id="musicToggle">
+      <option value="on">An</option>
+      <option value="off">Aus</option>
+    </select>
+    <input id="musicVol" type="range" min="0" max="100" value="40">
+  </div>
+
+  <div class="card">
+    <h3>🎨 Grafik</h3>
+    <select id="gfx">
+      <option value="low">Low</option>
+      <option value="medium" selected>Medium</option>
+      <option value="high">High</option>
+    </select>
+  </div>
+
+  <div class="card">
+    <h3>🕹️ Optimierung</h3>
+    <select id="inputMode">
+      <option value="touch">Handy</option>
+      <option value="pc">PC</option>
+    </select>
+  </div>
+
   <button class="secondary" onclick="go('start')">Zurück</button>
 </section>
 
 <script>
-/* ===== NAV ===== */
+/* ================= BASIS ================= */
+const SAVE_KEY="rocker_empire_fixed";
+
+/* Regionen – ganz Deutschland (Besitz NUR Liga 1) */
+const REGIONS=[
+  "Berlin","Brandenburg","Hamburg","Niedersachsen","NRW","Hessen",
+  "Sachsen","Bayern","Baden-Württemberg","Mecklenburg-Vorpommern",
+  "Schleswig-Holstein","Thüringen","Sachsen-Anhalt"
+];
+
+/* Liga-3 Supporter (spielbar) */
+const LIGA3_MCS=[
+  "Bulldozer Cottbus",
+  "Red Devils Support",
+  "Support 81",
+  "Free Riders",
+  "Independent Brotherhood"
+];
+
+let state={
+  chars:[],
+  settings:{ musicToggle:"on", musicVol:40, gfx:"medium", inputMode:"touch" }
+};
+let current=null;
+
+/* ================= NAV ================= */
 function go(id){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
@@ -95,150 +153,116 @@ function tab(id){
   document.getElementById(id).style.display="block";
 }
 
-/* ===== DATA ===== */
-const SAVE_KEY="rocker_empire_step5";
+/* ================= SAVE ================= */
+function save(){ localStorage.setItem(SAVE_KEY, JSON.stringify(state)); }
+function load(){
+  const d=localStorage.getItem(SAVE_KEY);
+  if(d){ state=JSON.parse(d); }
+}
 
-const LIGA3_MCS=[
-  "Bulldozer Cottbus","Red Devils Support","Support 81","Free Riders","Independent Brotherhood"
-];
+/* ================= SETTINGS ================= */
+function applySettings(){
+  document.body.classList.remove("low","medium","high","touch","pc");
+  document.body.classList.add(state.settings.gfx);
+  document.body.classList.add(state.settings.inputMode);
+  musicToggle.value=state.settings.musicToggle;
+  musicVol.value=state.settings.musicVol;
+  gfx.value=state.settings.gfx;
+  inputMode.value=state.settings.inputMode;
+}
+musicToggle.onchange=()=>{ state.settings.musicToggle=musicToggle.value; save(); };
+musicVol.oninput=()=>{ state.settings.musicVol=musicVol.value; save(); };
+gfx.onchange=()=>{ state.settings.gfx=gfx.value; applySettings(); save(); };
+inputMode.onchange=()=>{ state.settings.inputMode=inputMode.value; applySettings(); save(); };
 
-const REGIONS=[
-  {name:"Berlin", owner:"Hells Angels MC"},
-  {name:"Hamburg", owner:"Bandidos MC"},
-  {name:"NRW", owner:"Outlaws MC"},
-  {name:"Bayern", owner:"Pagans MC"},
-  {name:"Sachsen", owner:"Sons of Silence"}
-];
-
-let chars=[], current=null;
-
-/* ===== SAVE ===== */
-function save(){localStorage.setItem(SAVE_KEY,JSON.stringify(chars))}
-function load(){const d=localStorage.getItem(SAVE_KEY);if(d)chars=JSON.parse(d)}
-
-/* ===== CREATE ===== */
+/* ================= CREATE ================= */
 function updateCreateUI(){
-  const liga=+ligaInput.value;
-  nameInput.disabled = liga!==4;
-  mcSelect.classList.toggle("hidden", liga===4);
-  if(liga===3){
+  mcSelect.classList.toggle("hidden", ligaInput.value==4);
+  if(ligaInput.value==3){
     mcSelect.innerHTML="";
     LIGA3_MCS.forEach(m=>mcSelect.innerHTML+=`<option>${m}</option>`);
   }
 }
 function createChar(){
   const liga=+ligaInput.value;
-  chars.push({
+  state.chars.push({
     liga,
     name: liga===4?(nameInput.value||"Rider"):mcSelect.value,
     mc: liga===4?"Eigenständig":mcSelect.value,
     members: liga===4?1:6,
     money: liga===4?500:2000,
     influence: liga>=3?40:0,
-    weapons: 0,
-    chapter: false
+    weapons:0,
+    chapter:false
   });
   save(); renderChars(); go('chars');
 }
 
-/* ===== LIST ===== */
+/* ================= UI ================= */
 function renderChars(){
   charList.innerHTML="";
-  chars.forEach((c,i)=>{
+  state.chars.forEach((c,i)=>{
     charList.innerHTML+=`<button onclick="startGame(${i})">${c.name} (Liga ${c.liga})</button>`;
   });
 }
-
-/* ===== GAME ===== */
 function startGame(i){
   current=i;
-  renderAll();
+  renderGame();
   go('game'); tab('char');
 }
-
-function renderAll(){
-  const p=chars[current];
-  hud.innerHTML=`
-    <strong>${p.name}</strong><br>
-    ${p.mc}<br>
-    💶 ${p.money} € | 👥 ${p.members} | 🔫 ${p.weapons}
-  `;
+function renderGame(){
+  const p=state.chars[current];
+  hud.innerHTML=`<strong>${p.name}</strong><br>💶 ${p.money} € | 👥 ${p.members} | 🔫 ${p.weapons}`;
 
   char.innerHTML=`
     <div class="card">
       Liga ${p.liga}<br>
-      Einfluss ${p.influence}%<br>
+      Club: ${p.mc}<br>
+      Einfluss: ${p.influence}%<br>
       Chapter: ${p.chapter?"Ja":"Nein"}
     </div>
   `;
 
   map.innerHTML="";
   if(p.liga>=3){
-    REGIONS.forEach((r,i)=>{
-      map.innerHTML+=`
-        <div class="region">
-          <strong>${r.name}</strong><br>
-          Besitzer: ${r.owner}<br>
-          <button onclick="attack(${i})">Angreifen</button>
-        </div>
-      `;
+    REGIONS.forEach(r=>{
+      map.innerHTML+=`<div class="region">${r}<br>Besitzer: Liga-1-MC</div>`;
     });
+  }else{
+    map.innerHTML=`<div class="card small">Regionen ab Liga 3 sichtbar</div>`;
   }
 
   market.innerHTML=`
     <div class="card ${p.influence<50?'locked':''}">
-      🔫 Waffen kaufen (1000 € / Stück)<br>
-      <button onclick="buyWeapon()">Kaufen</button>
+      🔫 Waffenmarkt (sichtbar ab Liga 3)<br>
+      <button onclick="buyWeapon()">Waffe kaufen (1000 €)</button>
+      <div class="small">${p.influence>=50?"Zugang möglich":"Kein Zugang – Einfluss < 50%"}</div>
     </div>
+    ${p.liga>=3?'<div class="card">🌿 Biologische Drogen (ab Liga 3)</div>':''}
+    ${p.liga>=2?'<div class="card">🧪 Chemische Drogen (ab Liga 2)</div>':''}
   `;
 
   war.innerHTML=`
     <div class="card">
-      Chapter kaufen (2000 €)<br>
-      <button onclick="buyChapter()">Chapter eröffnen</button>
+      <button onclick="buyChapter()">Chapter eröffnen (2000 €)</button>
     </div>
   `;
 }
 
-/* ===== ACTIONS ===== */
+/* ================= ACTIONS ================= */
 function buyWeapon(){
-  const p=chars[current];
-  if(p.influence<50) return alert("Kein Zugriff");
-  if(p.money<1000) return alert("Zu wenig Geld");
-  p.money-=1000;
-  p.weapons++;
-  save(); renderAll();
+  const p=state.chars[current];
+  if(p.influence<50 || p.money<1000) return alert("Kein Zugriff");
+  p.money-=1000; p.weapons++; save(); renderGame();
 }
-
 function buyChapter(){
-  const p=chars[current];
-  if(p.liga<3) return alert("Nicht verfügbar");
-  if(p.members<6) return alert("Zu wenig Mitglieder");
-  if(p.money<2000) return alert("Zu wenig Geld");
-  p.money-=2000;
-  p.chapter=true;
-  save(); renderAll();
+  const p=state.chars[current];
+  if(p.liga<3 || p.members<6 || p.money<2000) return alert("Nicht möglich");
+  p.money-=2000; p.chapter=true; save(); renderGame();
 }
 
-function attack(i){
-  const p=chars[current];
-  if(!p.chapter) return alert("Kein Chapter");
-  if(p.weapons<=0) return alert("Keine Waffen");
-  p.weapons--;
-
-  if(Math.random()<0.6){
-    p.influence=Math.min(100,p.influence+15);
-    alert("Angriff erfolgreich – Einfluss steigt");
-  }else{
-    p.influence=Math.max(0,p.influence-10);
-    p.members=Math.max(1,p.members-1);
-    alert("Angriff gescheitert");
-  }
-  save(); renderAll();
-}
-
-/* ===== INIT ===== */
-load(); renderChars(); updateCreateUI();
+/* ================= INIT ================= */
+load(); applySettings(); renderChars(); updateCreateUI();
 </script>
 
 </body>
