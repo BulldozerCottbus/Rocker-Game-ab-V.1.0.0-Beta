@@ -27,25 +27,15 @@ nav button{background:#222;font-size:14px}
 .region{border:1px solid #2a2a2a;padding:12px;border-radius:12px;margin-bottom:10px;cursor:pointer}
 .locked{opacity:.5}
 .hidden{display:none}
-
-/* Grafik */
-.low *{filter:none}
-.medium *{filter:saturate(1.05)}
-.high *{filter:saturate(1.15) contrast(1.05)}
-
-/* Input */
-.touch button{padding:18px}
-.pc button{padding:10px}
 </style>
 </head>
 
-<body class="touch medium">
+<body>
 
 <!-- START -->
 <section id="start" class="screen active">
   <h1>🏍️ Rocker Empire</h1>
   <button onclick="go('chars')">Spielen</button>
-  <button class="secondary" onclick="go('settings')">Einstellungen</button>
 </section>
 
 <!-- CHARAKTERE -->
@@ -53,14 +43,13 @@ nav button{background:#222;font-size:14px}
   <h2>Charaktere</h2>
   <div id="charList"></div>
   <button onclick="go('create')">+ Neuer Charakter</button>
-  <button class="secondary" onclick="go('start')">Zurück</button>
 </section>
 
 <!-- CREATE -->
 <section id="create" class="screen">
   <h2>Neuer Charakter</h2>
   <div class="card">
-    <input id="nameInput" placeholder="Name (nur Liga 4)">
+    <input id="nameInput" placeholder="Name (Liga 4)">
     <select id="ligaInput" onchange="updateCreateUI()">
       <option value="4">Liga 4 – Eigener Weg</option>
       <option value="3">Liga 3 – Supporter-MC</option>
@@ -78,62 +67,28 @@ nav button{background:#222;font-size:14px}
     <button onclick="tab('char')">👤</button>
     <button onclick="tab('map')">🗺️</button>
     <button onclick="tab('shop')">🏪</button>
-    <button onclick="go('settings')">⚙️</button>
+    <button onclick="tab('police')">🚓</button>
   </nav>
 
   <div id="char" class="tab"></div>
   <div id="map" class="tab"></div>
   <div id="shop" class="tab"></div>
-</section>
-
-<!-- SETTINGS -->
-<section id="settings" class="screen">
-  <h2>Einstellungen</h2>
-
-  <div class="card">
-    <h3>🎵 Musik</h3>
-    <select id="musicToggle">
-      <option value="on">An</option>
-      <option value="off">Aus</option>
-    </select>
-    <input id="musicVol" type="range" min="0" max="100">
-  </div>
-
-  <div class="card">
-    <h3>🎨 Grafik</h3>
-    <select id="gfx">
-      <option value="low">Low</option>
-      <option value="medium">Medium</option>
-      <option value="high">High</option>
-    </select>
-  </div>
-
-  <div class="card">
-    <h3>🕹️ Optimierung</h3>
-    <select id="inputMode">
-      <option value="touch">Handy</option>
-      <option value="pc">PC</option>
-    </select>
-  </div>
-
-  <button class="secondary" onclick="go('start')">Zurück</button>
+  <div id="police" class="tab"></div>
 </section>
 
 <!-- REGION PANEL -->
 <section id="regionPanel" class="screen">
   <h2 id="regionTitle"></h2>
   <div class="card" id="regionInfo"></div>
-  <button onclick="askInfluence()">🤝 Einfluss anfragen</button>
-  <button onclick="buyInfluence()">💶 Einfluss kaufen</button>
   <button onclick="attackRegion()">⚔️ Angreifen</button>
   <button class="secondary" onclick="go('game')">Zurück</button>
 </section>
 
 <script>
 /* ================= BASIS ================= */
-const SAVE_KEY="rocker_empire_master_full";
+const SAVE_KEY="rocker_empire_master_step7";
 
-/* Liga-1-MCs */
+/* Liga-1-MCs + Loyalität */
 const MCs={
   "Hells Angels MC":{loyalty:40},
   "Bandidos MC":{loyalty:35},
@@ -142,7 +97,7 @@ const MCs={
   "Sons of Silence":{loyalty:25}
 };
 
-/* Regionen – kompletter Stand */
+/* Regionen (alle sichtbar, feste Besitzer) */
 const REGIONS=[
   {name:"Berlin",owner:"Hells Angels MC"},
   {name:"Brandenburg",owner:"Hells Angels MC"},
@@ -167,11 +122,7 @@ const LIGA3_MCS=[
   "Independent Brotherhood"
 ];
 
-let state={
-  chars:[],
-  settings:{musicToggle:"on",musicVol:40,gfx:"medium",inputMode:"touch"}
-};
-
+let state={chars:[]};
 let current=null;
 let selectedRegion=null;
 
@@ -188,19 +139,6 @@ function tab(id){
 /* ================= SAVE ================= */
 function save(){localStorage.setItem(SAVE_KEY,JSON.stringify(state))}
 function load(){const d=localStorage.getItem(SAVE_KEY);if(d)state=JSON.parse(d)}
-
-/* ================= SETTINGS ================= */
-function applySettings(){
-  document.body.className=state.settings.inputMode+" "+state.settings.gfx;
-  musicToggle.value=state.settings.musicToggle;
-  musicVol.value=state.settings.musicVol;
-  gfx.value=state.settings.gfx;
-  inputMode.value=state.settings.inputMode;
-}
-musicToggle.onchange=()=>{state.settings.musicToggle=musicToggle.value;save()}
-musicVol.oninput=()=>{state.settings.musicVol=musicVol.value;save()}
-gfx.onchange=()=>{state.settings.gfx=gfx.value;applySettings();save()}
-inputMode.onchange=()=>{state.settings.inputMode=inputMode.value;applySettings();save()}
 
 /* ================= CREATE ================= */
 function updateCreateUI(){
@@ -220,7 +158,8 @@ function createChar(){
     money:liga===4?500:2000,
     influence:liga===4?0:20,
     weapons:0,
-    weed:0
+    weed:0,
+    heat:0
   });
   save();renderChars();go("chars");
 }
@@ -239,7 +178,7 @@ function startGame(i){
 }
 function renderGame(){
   const p=state.chars[current];
-  hud.innerHTML=`${p.name} | 💶 ${p.money} € | 👥 ${p.members} | 🔫 ${p.weapons} | 🌿 ${p.weed}`;
+  hud.innerHTML=`${p.name} | 💶 ${p.money} € | 👥 ${p.members} | 🔫 ${p.weapons} | 🌿 ${p.weed} | 🚓 Heat ${p.heat}%`;
 
   char.innerHTML=`
     Liga ${p.liga}<br>
@@ -268,45 +207,40 @@ function renderGame(){
         <button onclick="buyWeapon('${mc}')">🔫 Waffe kaufen (1000 €)</button>
       </div>`;
   });
+
+  police.innerHTML=`
+    <div class="card">
+      Heat: ${p.heat}%<br>
+      <button onclick="bribePolice()">💸 Polizei schmieren</button>
+    </div>
+  `;
 }
 
 /* ================= REGION ================= */
 function openRegion(i){
   selectedRegion=i;
   const r=REGIONS[i];
-  const p=state.chars[current];
   regionTitle.textContent=r.name;
   regionInfo.innerHTML=`
     Besitzer: ${r.owner}<br>
-    Dein Einfluss: ${p.influence}%<br>
-    Loyalität: ${MCs[r.owner].loyalty}%
+    Loyalität: ${MCs[r.owner].loyalty}%<br>
+    Dein Einfluss: ${state.chars[current].influence}%
   `;
   go("regionPanel");
-}
-function askInfluence(){
-  const p=state.chars[current];
-  if(Math.random()<0.3){
-    p.influence=Math.min(100,p.influence+5);
-    MCs[REGIONS[selectedRegion].owner].loyalty+=2;
-  }
-  save();go("game");
-}
-function buyInfluence(){
-  const p=state.chars[current];
-  const cost=Math.min(70000,10000+p.influence*500);
-  if(p.money<cost)return alert("Zu wenig Geld");
-  p.money-=cost;p.influence=Math.min(100,p.influence+10);
-  MCs[REGIONS[selectedRegion].owner].loyalty+=3;
-  save();go("game");
 }
 function attackRegion(){
   const p=state.chars[current];
   const mc=REGIONS[selectedRegion].owner;
   if(p.weapons<=0)return alert("Keine Waffen");
   p.weapons--;
+  p.heat+=15;
   MCs[mc].loyalty=Math.max(0,MCs[mc].loyalty-10);
-  if(Math.random()<0.5)p.influence=Math.min(100,p.influence+15);
-  else{p.influence=Math.max(0,p.influence-10);p.members=Math.max(1,p.members-1);}
+  if(Math.random()<0.5){
+    p.influence=Math.min(100,p.influence+15);
+  }else{
+    p.members=Math.max(1,p.members-1);
+  }
+  checkRaid();
   save();go("game");
 }
 
@@ -314,7 +248,9 @@ function attackRegion(){
 function buyWeed(mc){
   const p=state.chars[current];
   if(p.money<500)return alert("Zu wenig Geld");
-  p.money-=500;p.weed++;
+  p.money-=500;
+  p.weed++;
+  p.heat+=5;
   MCs[mc].loyalty=Math.min(100,MCs[mc].loyalty+3);
   save();renderGame();
 }
@@ -322,13 +258,38 @@ function buyWeapon(mc){
   const p=state.chars[current];
   if(MCs[mc].loyalty<50)return alert("Loyalität zu gering");
   if(p.money<1000)return alert("Zu wenig Geld");
-  p.money-=1000;p.weapons++;
+  p.money-=1000;
+  p.weapons++;
+  p.heat+=8;
   MCs[mc].loyalty=Math.min(100,MCs[mc].loyalty+2);
   save();renderGame();
 }
 
+/* ================= POLICE ================= */
+function bribePolice(){
+  const p=state.chars[current];
+  const cost=p.liga===4?1000:3000;
+  if(p.money<cost)return alert("Zu wenig Geld");
+  p.money-=cost;
+  p.heat=Math.max(0,p.heat-25);
+  save();renderGame();
+}
+function checkRaid(){
+  const p=state.chars[current];
+  if(p.heat<70)return;
+  if(Math.random()<p.heat/100){
+    alert("🚨 Razzia!");
+    p.money=Math.max(0,p.money-1000);
+    p.weapons=Math.max(0,p.weapons-1);
+    p.weed=Math.max(0,p.weed-1);
+    p.members=Math.max(1,p.members-1);
+    p.heat=50;
+  }
+}
+
 /* ================= INIT ================= */
-load();applySettings();renderChars();updateCreateUI();
+load();
+renderChars();
 </script>
 
 </body>
