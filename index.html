@@ -7,14 +7,18 @@
 
 <style>
 :root{
-  --bg:#0e0e0e; --card:#1a1a1a; --accent:#b30000; --muted:#9aa0a6; --radius:14px;
+  --bg:#0e0e0e;
+  --card:#1a1a1a;
+  --accent:#b30000;
+  --muted:#9aa0a6;
+  --radius:14px;
 }
 *{box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial}
 body{margin:0;background:var(--bg);color:#fff}
 .screen{display:none;padding:16px}
 .screen.active{display:block}
 h1,h2,h3{text-align:center;margin:10px 0}
-button{width:100%;padding:14px;margin:8px 0;background:var(--accent);color:#fff;border:none;border-radius:var(--radius);font-size:16px}
+button{width:100%;padding:14px;margin:8px 0;background:var(--accent);color:#fff;border:0;border-radius:var(--radius);font-size:16px}
 button.secondary{background:#333}
 .card{background:var(--card);padding:14px;border-radius:var(--radius);margin-bottom:12px}
 nav{display:flex;gap:6px;justify-content:space-around;background:#111;position:sticky;top:0;padding:6px}
@@ -73,13 +77,13 @@ nav button{background:#222;font-size:14px}
   <nav>
     <button onclick="tab('char')">👤</button>
     <button onclick="tab('map')">🗺️</button>
-    <button onclick="tab('market')">🏪</button>
+    <button onclick="tab('shop')">🏪</button>
     <button onclick="go('settings')">⚙️</button>
   </nav>
 
   <div id="char" class="tab"></div>
   <div id="map" class="tab"></div>
-  <div id="market" class="tab"></div>
+  <div id="shop" class="tab"></div>
 </section>
 
 <!-- SETTINGS -->
@@ -127,8 +131,18 @@ nav button{background:#222;font-size:14px}
 
 <script>
 /* ================= BASIS ================= */
-const SAVE_KEY="rocker_empire_master";
+const SAVE_KEY="rocker_empire_master_full";
 
+/* Liga-1-MCs */
+const MCs={
+  "Hells Angels MC":{loyalty:40},
+  "Bandidos MC":{loyalty:35},
+  "Outlaws MC":{loyalty:30},
+  "Pagans MC":{loyalty:30},
+  "Sons of Silence":{loyalty:25}
+};
+
+/* Regionen – kompletter Stand */
 const REGIONS=[
   {name:"Berlin",owner:"Hells Angels MC"},
   {name:"Brandenburg",owner:"Hells Angels MC"},
@@ -157,6 +171,7 @@ let state={
   chars:[],
   settings:{musicToggle:"on",musicVol:40,gfx:"medium",inputMode:"touch"}
 };
+
 let current=null;
 let selectedRegion=null;
 
@@ -204,7 +219,8 @@ function createChar(){
     members:liga===4?1:6,
     money:liga===4?500:2000,
     influence:liga===4?0:20,
-    weapons:0
+    weapons:0,
+    weed:0
   });
   save();renderChars();go("chars");
 }
@@ -223,24 +239,35 @@ function startGame(i){
 }
 function renderGame(){
   const p=state.chars[current];
-  hud.innerHTML=`${p.name} | 💶 ${p.money} € | 👥 ${p.members} | 🔫 ${p.weapons}`;
-  char.innerHTML=`Liga ${p.liga}<br>Club: ${p.mc}<br>Einfluss: ${p.influence}%`;
+  hud.innerHTML=`${p.name} | 💶 ${p.money} € | 👥 ${p.members} | 🔫 ${p.weapons} | 🌿 ${p.weed}`;
+
+  char.innerHTML=`
+    Liga ${p.liga}<br>
+    Club: ${p.mc}<br>
+    Einfluss: ${p.influence}%
+  `;
 
   map.innerHTML="";
   REGIONS.forEach((r,i)=>{
     map.innerHTML+=`
       <div class="region" onclick="openRegion(${i})">
         <strong>${r.name}</strong><br>
-        Besitzer: ${r.owner}
+        Besitzer: ${r.owner}<br>
+        Loyalität: ${MCs[r.owner].loyalty}%
       </div>`;
   });
 
-  market.innerHTML=`
-    <div class="card ${p.influence<50?'locked':''}">
-      🔫 Waffenmarkt<br>
-      <button onclick="buyWeapon()">Waffe kaufen (1000 €)</button>
-    </div>
-  `;
+  shop.innerHTML="";
+  Object.keys(MCs).forEach(mc=>{
+    const l=MCs[mc].loyalty;
+    shop.innerHTML+=`
+      <div class="card ${l<30?'locked':''}">
+        <strong>${mc}</strong><br>
+        Loyalität: ${l}%<br>
+        <button onclick="buyWeed('${mc}')">🌿 Gras kaufen (500 €)</button>
+        <button onclick="buyWeapon('${mc}')">🔫 Waffe kaufen (1000 €)</button>
+      </div>`;
+  });
 }
 
 /* ================= REGION ================= */
@@ -249,12 +276,19 @@ function openRegion(i){
   const r=REGIONS[i];
   const p=state.chars[current];
   regionTitle.textContent=r.name;
-  regionInfo.innerHTML=`Besitzer: ${r.owner}<br>Dein Einfluss: ${p.influence}%`;
+  regionInfo.innerHTML=`
+    Besitzer: ${r.owner}<br>
+    Dein Einfluss: ${p.influence}%<br>
+    Loyalität: ${MCs[r.owner].loyalty}%
+  `;
   go("regionPanel");
 }
 function askInfluence(){
   const p=state.chars[current];
-  if(Math.random()<0.3)p.influence=Math.min(100,p.influence+5);
+  if(Math.random()<0.3){
+    p.influence=Math.min(100,p.influence+5);
+    MCs[REGIONS[selectedRegion].owner].loyalty+=2;
+  }
   save();go("game");
 }
 function buyInfluence(){
@@ -262,20 +296,35 @@ function buyInfluence(){
   const cost=Math.min(70000,10000+p.influence*500);
   if(p.money<cost)return alert("Zu wenig Geld");
   p.money-=cost;p.influence=Math.min(100,p.influence+10);
+  MCs[REGIONS[selectedRegion].owner].loyalty+=3;
   save();go("game");
 }
 function attackRegion(){
   const p=state.chars[current];
+  const mc=REGIONS[selectedRegion].owner;
   if(p.weapons<=0)return alert("Keine Waffen");
   p.weapons--;
+  MCs[mc].loyalty=Math.max(0,MCs[mc].loyalty-10);
   if(Math.random()<0.5)p.influence=Math.min(100,p.influence+15);
   else{p.influence=Math.max(0,p.influence-10);p.members=Math.max(1,p.members-1);}
   save();go("game");
 }
-function buyWeapon(){
+
+/* ================= SHOP ================= */
+function buyWeed(mc){
   const p=state.chars[current];
-  if(p.influence<50||p.money<1000)return alert("Kein Zugriff");
-  p.money-=1000;p.weapons++;save();renderGame();
+  if(p.money<500)return alert("Zu wenig Geld");
+  p.money-=500;p.weed++;
+  MCs[mc].loyalty=Math.min(100,MCs[mc].loyalty+3);
+  save();renderGame();
+}
+function buyWeapon(mc){
+  const p=state.chars[current];
+  if(MCs[mc].loyalty<50)return alert("Loyalität zu gering");
+  if(p.money<1000)return alert("Zu wenig Geld");
+  p.money-=1000;p.weapons++;
+  MCs[mc].loyalty=Math.min(100,MCs[mc].loyalty+2);
+  save();renderGame();
 }
 
 /* ================= INIT ================= */
