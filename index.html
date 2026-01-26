@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Rocker Empire</title>
 
 <style>
@@ -14,13 +14,13 @@ body{margin:0;background:var(--bg);color:#fff}
 .screen{display:none;padding:16px}
 .screen.active{display:block}
 h1,h2,h3{text-align:center;margin:10px 0}
-button{width:100%;padding:14px;margin:8px 0;background:var(--accent);color:#fff;border:0;border-radius:var(--radius);font-size:16px}
+button{width:100%;padding:14px;margin:8px 0;background:var(--accent);color:#fff;border:none;border-radius:var(--radius);font-size:16px}
 button.secondary{background:#333}
 .card{background:var(--card);padding:14px;border-radius:var(--radius);margin-bottom:12px}
 nav{display:flex;gap:6px;justify-content:space-around;background:#111;position:sticky;top:0;padding:6px}
 nav button{background:#222;font-size:14px}
 .small{color:var(--muted);font-size:13px}
-.region{border:1px solid #2a2a2a;padding:12px;border-radius:12px;margin-bottom:10px}
+.region{border:1px solid #2a2a2a;padding:12px;border-radius:12px;margin-bottom:10px;cursor:pointer}
 .locked{opacity:.5}
 .hidden{display:none}
 
@@ -59,7 +59,7 @@ nav button{background:#222;font-size:14px}
     <input id="nameInput" placeholder="Name (nur Liga 4)">
     <select id="ligaInput" onchange="updateCreateUI()">
       <option value="4">Liga 4 – Eigener Weg</option>
-      <option value="3">Liga 3 – Supporter</option>
+      <option value="3">Liga 3 – Supporter-MC</option>
     </select>
     <select id="mcSelect" class="hidden"></select>
     <button onclick="createChar()">Erstellen</button>
@@ -74,14 +74,12 @@ nav button{background:#222;font-size:14px}
     <button onclick="tab('char')">👤</button>
     <button onclick="tab('map')">🗺️</button>
     <button onclick="tab('market')">🏪</button>
-    <button onclick="tab('war')">⚔️</button>
     <button onclick="go('settings')">⚙️</button>
   </nav>
 
   <div id="char" class="tab"></div>
   <div id="map" class="tab"></div>
   <div id="market" class="tab"></div>
-  <div id="war" class="tab"></div>
 </section>
 
 <!-- SETTINGS -->
@@ -94,14 +92,14 @@ nav button{background:#222;font-size:14px}
       <option value="on">An</option>
       <option value="off">Aus</option>
     </select>
-    <input id="musicVol" type="range" min="0" max="100" value="40">
+    <input id="musicVol" type="range" min="0" max="100">
   </div>
 
   <div class="card">
     <h3>🎨 Grafik</h3>
     <select id="gfx">
       <option value="low">Low</option>
-      <option value="medium" selected>Medium</option>
+      <option value="medium">Medium</option>
       <option value="high">High</option>
     </select>
   </div>
@@ -117,29 +115,34 @@ nav button{background:#222;font-size:14px}
   <button class="secondary" onclick="go('start')">Zurück</button>
 </section>
 
+<!-- REGION PANEL -->
+<section id="regionPanel" class="screen">
+  <h2 id="regionTitle"></h2>
+  <div class="card" id="regionInfo"></div>
+  <button onclick="askInfluence()">🤝 Einfluss anfragen</button>
+  <button onclick="buyInfluence()">💶 Einfluss kaufen</button>
+  <button onclick="attackRegion()">⚔️ Angreifen</button>
+  <button class="secondary" onclick="go('game')">Zurück</button>
+</section>
+
 <script>
 /* ================= BASIS ================= */
-const SAVE_KEY="rocker_empire_fixed";
+const SAVE_KEY="rocker_empire_master";
 
-/* Regionen + feste Liga-1-Besitzer */
 const REGIONS=[
-  {name:"Berlin", owner:"Hells Angels MC"},
-  {name:"Brandenburg", owner:"Hells Angels MC"},
-  {name:"Sachsen", owner:"Hells Angels MC"},
-
-  {name:"Hamburg", owner:"Bandidos MC"},
-  {name:"Niedersachsen", owner:"Bandidos MC"},
-  {name:"Schleswig-Holstein", owner:"Bandidos MC"},
-
-  {name:"NRW", owner:"Outlaws MC"},
-  {name:"Hessen", owner:"Outlaws MC"},
-
-  {name:"Bayern", owner:"Pagans MC"},
-  {name:"Baden-Württemberg", owner:"Pagans MC"},
-
-  {name:"Thüringen", owner:"Sons of Silence"},
-  {name:"Sachsen-Anhalt", owner:"Sons of Silence"},
-  {name:"Mecklenburg-Vorpommern", owner:"Sons of Silence"}
+  {name:"Berlin",owner:"Hells Angels MC"},
+  {name:"Brandenburg",owner:"Hells Angels MC"},
+  {name:"Sachsen",owner:"Hells Angels MC"},
+  {name:"Hamburg",owner:"Bandidos MC"},
+  {name:"Niedersachsen",owner:"Bandidos MC"},
+  {name:"Schleswig-Holstein",owner:"Bandidos MC"},
+  {name:"NRW",owner:"Outlaws MC"},
+  {name:"Hessen",owner:"Outlaws MC"},
+  {name:"Bayern",owner:"Pagans MC"},
+  {name:"Baden-Württemberg",owner:"Pagans MC"},
+  {name:"Thüringen",owner:"Sons of Silence"},
+  {name:"Sachsen-Anhalt",owner:"Sons of Silence"},
+  {name:"Mecklenburg-Vorpommern",owner:"Sons of Silence"}
 ];
 
 const LIGA3_MCS=[
@@ -152,42 +155,41 @@ const LIGA3_MCS=[
 
 let state={
   chars:[],
-  settings:{ musicToggle:"on", musicVol:40, gfx:"medium", inputMode:"touch" }
+  settings:{musicToggle:"on",musicVol:40,gfx:"medium",inputMode:"touch"}
 };
 let current=null;
+let selectedRegion=null;
 
 /* ================= NAV ================= */
 function go(id){
-  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
+  document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
+  document.getElementById(id).classList.add("active");
 }
 function tab(id){
-  document.querySelectorAll('.tab').forEach(t=>t.style.display="none");
+  document.querySelectorAll(".tab").forEach(t=>t.style.display="none");
   document.getElementById(id).style.display="block";
 }
 
 /* ================= SAVE ================= */
-function save(){ localStorage.setItem(SAVE_KEY, JSON.stringify(state)); }
-function load(){ const d=localStorage.getItem(SAVE_KEY); if(d) state=JSON.parse(d); }
+function save(){localStorage.setItem(SAVE_KEY,JSON.stringify(state))}
+function load(){const d=localStorage.getItem(SAVE_KEY);if(d)state=JSON.parse(d)}
 
 /* ================= SETTINGS ================= */
 function applySettings(){
-  document.body.classList.remove("low","medium","high","touch","pc");
-  document.body.classList.add(state.settings.gfx);
-  document.body.classList.add(state.settings.inputMode);
+  document.body.className=state.settings.inputMode+" "+state.settings.gfx;
   musicToggle.value=state.settings.musicToggle;
   musicVol.value=state.settings.musicVol;
   gfx.value=state.settings.gfx;
   inputMode.value=state.settings.inputMode;
 }
-musicToggle.onchange=()=>{ state.settings.musicToggle=musicToggle.value; save(); };
-musicVol.oninput=()=>{ state.settings.musicVol=musicVol.value; save(); };
-gfx.onchange=()=>{ state.settings.gfx=gfx.value; applySettings(); save(); };
-inputMode.onchange=()=>{ state.settings.inputMode=inputMode.value; applySettings(); save(); };
+musicToggle.onchange=()=>{state.settings.musicToggle=musicToggle.value;save()}
+musicVol.oninput=()=>{state.settings.musicVol=musicVol.value;save()}
+gfx.onchange=()=>{state.settings.gfx=gfx.value;applySettings();save()}
+inputMode.onchange=()=>{state.settings.inputMode=inputMode.value;applySettings();save()}
 
 /* ================= CREATE ================= */
 function updateCreateUI(){
-  mcSelect.classList.toggle("hidden", ligaInput.value==4);
+  mcSelect.classList.toggle("hidden",ligaInput.value==4);
   if(ligaInput.value==3){
     mcSelect.innerHTML="";
     LIGA3_MCS.forEach(m=>mcSelect.innerHTML+=`<option>${m}</option>`);
@@ -197,15 +199,14 @@ function createChar(){
   const liga=+ligaInput.value;
   state.chars.push({
     liga,
-    name: liga===4?(nameInput.value||"Rider"):mcSelect.value,
-    mc: liga===4?"Eigenständig":mcSelect.value,
-    members: liga===4?1:6,
-    money: liga===4?500:2000,
-    influence: liga>=3?40:0,
-    weapons:0,
-    chapter:false
+    name:liga===4?(nameInput.value||"Rider"):mcSelect.value,
+    mc:liga===4?"Eigenständig":mcSelect.value,
+    members:liga===4?1:6,
+    money:liga===4?500:2000,
+    influence:liga===4?0:20,
+    weapons:0
   });
-  save(); renderChars(); go('chars');
+  save();renderChars();go("chars");
 }
 
 /* ================= UI ================= */
@@ -218,66 +219,67 @@ function renderChars(){
 function startGame(i){
   current=i;
   renderGame();
-  go('game'); tab('char');
+  go("game");tab("char");
 }
 function renderGame(){
   const p=state.chars[current];
-  hud.innerHTML=`<strong>${p.name}</strong><br>💶 ${p.money} € | 👥 ${p.members} | 🔫 ${p.weapons}`;
-
-  char.innerHTML=`
-    <div class="card">
-      Liga ${p.liga}<br>
-      Club: ${p.mc}<br>
-      Einfluss: ${p.influence}%<br>
-      Chapter: ${p.chapter?"Ja":"Nein"}
-    </div>
-  `;
+  hud.innerHTML=`${p.name} | 💶 ${p.money} € | 👥 ${p.members} | 🔫 ${p.weapons}`;
+  char.innerHTML=`Liga ${p.liga}<br>Club: ${p.mc}<br>Einfluss: ${p.influence}%`;
 
   map.innerHTML="";
-  if(p.liga>=3){
-    REGIONS.forEach(r=>{
-      map.innerHTML+=`
-        <div class="region">
-          <strong>${r.name}</strong><br>
-          Besitzer: ${r.owner}
-        </div>
-      `;
-    });
-  }else{
-    map.innerHTML=`<div class="card small">Regionen ab Liga 3 sichtbar</div>`;
-  }
+  REGIONS.forEach((r,i)=>{
+    map.innerHTML+=`
+      <div class="region" onclick="openRegion(${i})">
+        <strong>${r.name}</strong><br>
+        Besitzer: ${r.owner}
+      </div>`;
+  });
 
   market.innerHTML=`
     <div class="card ${p.influence<50?'locked':''}">
       🔫 Waffenmarkt<br>
       <button onclick="buyWeapon()">Waffe kaufen (1000 €)</button>
-      <div class="small">${p.influence>=50?"Zugang möglich":"Kein Zugang – Einfluss < 50%"}</div>
-    </div>
-    ${p.liga>=3?'<div class="card">🌿 Biologische Drogen</div>':''}
-    ${p.liga>=2?'<div class="card">🧪 Chemische Drogen</div>':''}
-  `;
-
-  war.innerHTML=`
-    <div class="card">
-      <button onclick="buyChapter()">Chapter eröffnen (2000 €)</button>
     </div>
   `;
 }
 
-/* ================= ACTIONS ================= */
+/* ================= REGION ================= */
+function openRegion(i){
+  selectedRegion=i;
+  const r=REGIONS[i];
+  const p=state.chars[current];
+  regionTitle.textContent=r.name;
+  regionInfo.innerHTML=`Besitzer: ${r.owner}<br>Dein Einfluss: ${p.influence}%`;
+  go("regionPanel");
+}
+function askInfluence(){
+  const p=state.chars[current];
+  if(Math.random()<0.3)p.influence=Math.min(100,p.influence+5);
+  save();go("game");
+}
+function buyInfluence(){
+  const p=state.chars[current];
+  const cost=Math.min(70000,10000+p.influence*500);
+  if(p.money<cost)return alert("Zu wenig Geld");
+  p.money-=cost;p.influence=Math.min(100,p.influence+10);
+  save();go("game");
+}
+function attackRegion(){
+  const p=state.chars[current];
+  if(p.weapons<=0)return alert("Keine Waffen");
+  p.weapons--;
+  if(Math.random()<0.5)p.influence=Math.min(100,p.influence+15);
+  else{p.influence=Math.max(0,p.influence-10);p.members=Math.max(1,p.members-1);}
+  save();go("game");
+}
 function buyWeapon(){
   const p=state.chars[current];
-  if(p.influence<50 || p.money<1000) return alert("Kein Zugriff");
-  p.money-=1000; p.weapons++; save(); renderGame();
-}
-function buyChapter(){
-  const p=state.chars[current];
-  if(p.liga<3 || p.members<6 || p.money<2000) return alert("Nicht möglich");
-  p.money-=2000; p.chapter=true; save(); renderGame();
+  if(p.influence<50||p.money<1000)return alert("Kein Zugriff");
+  p.money-=1000;p.weapons++;save();renderGame();
 }
 
 /* ================= INIT ================= */
-load(); applySettings(); renderChars(); updateCreateUI();
+load();applySettings();renderChars();updateCreateUI();
 </script>
 
 </body>
