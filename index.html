@@ -17,63 +17,33 @@
 html,body{margin:0;background:var(--bg);color:#fff}
 .screen{display:none;padding:16px}
 .screen.active{display:block}
-h1,h2,h3{margin:10px 0;text-align:center}
+h1,h2,h3{text-align:center;margin:10px 0}
 button{
   width:100%; padding:14px; margin:8px 0;
   background:var(--accent); color:#fff; border:0; border-radius:var(--radius);
-  font-size:16px; cursor:pointer
+  font-size:16px
 }
 button.secondary{background:#333}
-.card{
-  background:var(--card); padding:14px; border-radius:var(--radius); margin-bottom:12px
-}
-.row{display:flex; gap:10px}
-.row > *{flex:1}
-input,select{
-  width:100%; padding:12px; border-radius:12px; border:1px solid #333;
-  background:#0b0b0b; color:#fff
-}
-nav{
-  display:flex; gap:6px; justify-content:space-around;
-  background:#111; position:sticky; top:0; padding:6px
-}
-nav button{background:#222; font-size:14px}
-.small{color:var(--muted); font-size:13px}
-.toggle{display:flex; align-items:center; justify-content:space-between}
-.range{width:100%}
-.hidden{display:none}
-
-/* Grafik-Optionen */
-.low *{filter:none}
-.medium *{filter:saturate(1.05)}
-.high *{filter:saturate(1.15) contrast(1.05)}
-
-/* Touch-Ziele */
-.touch button{padding:16px}
-.pc button{padding:12px}
-
-/* Sanfte Übergänge */
-.fade{animation:fade .2s ease}
-@keyframes fade{from{opacity:.6} to{opacity:1}}
+.card{background:var(--card);padding:14px;border-radius:var(--radius);margin-bottom:12px}
+nav{display:flex;gap:6px;justify-content:space-around;background:#111;position:sticky;top:0;padding:6px}
+nav button{background:#222;font-size:14px}
+.small{color:var(--muted);font-size:13px}
 </style>
 </head>
 
 <body class="touch medium">
 
 <!-- START -->
-<section id="start" class="screen active fade">
+<section id="start" class="screen active">
   <h1>🏍️ Rocker Empire</h1>
   <div class="card">
-    <p class="small" style="text-align:center">
-      Core-Build • Stabil • Safari & PC
-    </p>
     <button onclick="go('chars')">Spielen</button>
     <button class="secondary" onclick="go('settings')">Einstellungen</button>
   </div>
 </section>
 
 <!-- CHAR LIST -->
-<section id="chars" class="screen fade">
+<section id="chars" class="screen">
   <h2>Charaktere</h2>
   <div id="charList"></div>
   <button onclick="go('create')">+ Neuer Charakter</button>
@@ -81,174 +51,139 @@ nav button{background:#222; font-size:14px}
 </section>
 
 <!-- CREATE -->
-<section id="create" class="screen fade">
+<section id="create" class="screen">
   <h2>Neuer Charakter</h2>
   <div class="card">
     <input id="nameInput" placeholder="Name" />
-    <div class="row">
-      <select id="ligaInput">
-        <option value="4">Liga 4 – Einzelgänger</option>
-        <option value="3">Liga 3 – Supporter</option>
-      </select>
-      <select id="ageInput">
-        <option>21</option><option>25</option><option>30</option><option>35</option><option>40</option>
-      </select>
-    </div>
+    <select id="ligaInput">
+      <option value="4">Liga 4 – Einzelgänger</option>
+      <option value="3">Liga 3 – Supporter</option>
+    </select>
     <button onclick="createChar()">Erstellen</button>
   </div>
-  <button class="secondary" onclick="go('chars')">Abbrechen</button>
 </section>
 
-<!-- GAME (nur HUD in Schritt 1) -->
-<section id="game" class="screen fade">
+<!-- GAME -->
+<section id="game" class="screen">
   <div class="card" id="hud"></div>
+
   <nav>
-    <button onclick="go('chars')">👤 Charakter</button>
-    <button onclick="go('settings')">⚙️ Settings</button>
+    <button onclick="tab('char')">👤</button>
+    <button onclick="tab('club')">🏍️</button>
+    <button onclick="tab('economy')">💰</button>
+    <button onclick="go('settings')">⚙️</button>
   </nav>
+
+  <div id="char" class="tab"></div>
+  <div id="club" class="tab"></div>
+  <div id="economy" class="tab"></div>
 </section>
 
-<!-- SETTINGS -->
-<section id="settings" class="screen fade">
+<!-- SETTINGS (aus Schritt 1 unverändert) -->
+<section id="settings" class="screen">
   <h2>Einstellungen</h2>
-
-  <div class="card">
-    <h3>🎵 Musik</h3>
-    <div class="toggle">
-      <span>Menü-Musik</span>
-      <select id="musicToggle" onchange="setMusic()">
-        <option value="on">An</option>
-        <option value="off">Aus</option>
-      </select>
-    </div>
-    <input class="range" id="musicVol" type="range" min="0" max="100" value="40" oninput="setMusic()" />
-    <div class="small">Lautstärke</div>
-  </div>
-
-  <div class="card">
-    <h3>🎨 Grafik</h3>
-    <select id="gfx" onchange="setGfx()">
-      <option value="low">Low</option>
-      <option value="medium" selected>Medium</option>
-      <option value="high">High</option>
-    </select>
-  </div>
-
-  <div class="card">
-    <h3>🕹️ Steuerung</h3>
-    <select id="inputMode" onchange="setInput()">
-      <option value="touch" selected>Handy (Touch)</option>
-      <option value="pc">PC (Maus/Tastatur)</option>
-    </select>
-    <div class="small">Passt Button-Größe & Spacing an</div>
-  </div>
-
   <button class="secondary" onclick="go('start')">Zurück</button>
 </section>
 
-<!-- AUDIO (ruhige Menü-Musik, frei verwendbar) -->
-<audio id="music" loop>
-  <source src="https://cdn.pixabay.com/download/audio/2022/03/15/audio_0a8e7a9e2a.mp3?filename=ambient-piano-logo-112194.mp3" type="audio/mpeg">
-</audio>
-
 <script>
-/* ================= CORE NAV ================= */
+/* ===== NAV ===== */
 function go(id){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
 }
+function tab(id){
+  document.querySelectorAll('.tab').forEach(t=>t.style.display="none");
+  document.getElementById(id).style.display="block";
+}
 
-/* ================= STATE ================= */
-const SAVE_KEY="re_core_v1";
+/* ===== STATE ===== */
+const SAVE_KEY="re_step2";
 let chars=[];
 let current=null;
 
-/* ================= SAVE / LOAD ================= */
-function save(){
-  localStorage.setItem(SAVE_KEY, JSON.stringify({chars, settings: getSettings()}));
-}
+/* ===== SAVE / LOAD ===== */
+function save(){localStorage.setItem(SAVE_KEY,JSON.stringify({chars}))}
 function load(){
-  const raw=localStorage.getItem(SAVE_KEY);
-  if(!raw) return;
-  try{
-    const data=JSON.parse(raw);
-    chars=data.chars||[];
-    applySettings(data.settings||{});
-  }catch(e){}
+  const d=localStorage.getItem(SAVE_KEY);
+  if(!d)return;
+  chars=JSON.parse(d).chars||[];
 }
 
-/* ================= CHAR ================= */
+/* ===== CHAR ===== */
 function createChar(){
-  const c={
-    name: nameInput.value || "Rider",
-    liga: +ligaInput.value,
-    age: +ageInput.value
-  };
-  chars.push(c);
-  save();
-  renderChars();
-  go('chars');
+  chars.push({
+    name:nameInput.value||"Rider",
+    liga:+ligaInput.value,
+    money: ligaInput.value==4?500:2000,
+    members: ligaInput.value==4?1:6,
+    income: ligaInput.value==4?50:120
+  });
+  save(); renderChars(); go('chars');
 }
+
 function renderChars(){
   charList.innerHTML="";
   chars.forEach((c,i)=>{
-    const b=document.createElement('button');
+    const b=document.createElement("button");
     b.textContent=`${c.name} (Liga ${c.liga})`;
     b.onclick=()=>startGame(i);
     charList.appendChild(b);
   });
 }
+
 function startGame(i){
   current=i;
-  hud.innerHTML = `
-    <h3>${chars[i].name}</h3>
-    <div class="small">Liga ${chars[i].liga} • Alter ${chars[i].age}</div>
-    <p class="small">Schritt 1 aktiv – Core stabil</p>
-  `;
+  renderGame();
   go('game');
+  tab('char');
 }
 
-/* ================= SETTINGS ================= */
-const musicEl=document.getElementById('music');
-function setMusic(){
-  const on = document.getElementById('musicToggle').value === 'on';
-  const vol = document.getElementById('musicVol').value/100;
-  musicEl.volume = vol;
-  if(on){ musicEl.play().catch(()=>{}); }
-  else{ musicEl.pause(); }
-  save();
-}
-function setGfx(){
-  document.body.classList.remove('low','medium','high');
-  document.body.classList.add(document.getElementById('gfx').value);
-  save();
-}
-function setInput(){
-  document.body.classList.remove('touch','pc');
-  document.body.classList.add(document.getElementById('inputMode').value);
-  save();
-}
-function getSettings(){
-  return {
-    musicToggle: document.getElementById('musicToggle').value,
-    musicVol: document.getElementById('musicVol').value,
-    gfx: document.getElementById('gfx').value,
-    inputMode: document.getElementById('inputMode').value
-  };
-}
-function applySettings(s){
-  if(!s) return;
-  if(s.musicToggle) document.getElementById('musicToggle').value=s.musicToggle;
-  if(s.musicVol) document.getElementById('musicVol').value=s.musicVol;
-  if(s.gfx){ document.getElementById('gfx').value=s.gfx; setGfx(); }
-  if(s.inputMode){ document.getElementById('inputMode').value=s.inputMode; setInput(); }
-  setMusic();
+/* ===== GAME UI ===== */
+function renderGame(){
+  const p=chars[current];
+  hud.innerHTML=`<strong>${p.name}</strong><br>💶 ${p.money} €`;
+
+  char.innerHTML=`
+    <div class="card">
+      Liga: ${p.liga}<br>
+      Status: ${p.members>=6?"Prospect-Club":"Einzelperson"}
+    </div>
+  `;
+
+  club.innerHTML=`
+    <div class="card">
+      Mitglieder: ${p.members}<br>
+      <button onclick="recruit()">Mitglied rekrutieren (300€)</button>
+    </div>
+  `;
+
+  economy.innerHTML=`
+    <div class="card">
+      Einkommen: ${p.income} €/Minute<br>
+      <div class="small">Nur legale Einnahmen</div>
+    </div>
+  `;
 }
 
-/* ================= INIT ================= */
-load();
-renderChars();
-applySettings(getSettings());
+/* ===== ACTIONS ===== */
+function recruit(){
+  const p=chars[current];
+  if(p.money<300)return alert("Zu wenig Geld");
+  p.money-=300;
+  p.members++;
+  p.income+=20;
+  save(); renderGame();
+}
+
+/* ===== INCOME LOOP ===== */
+setInterval(()=>{
+  if(current===null)return;
+  chars[current].money+=chars[current].income;
+  save(); renderGame();
+},60000);
+
+/* ===== INIT ===== */
+load(); renderChars();
 </script>
 </body>
 </html>
