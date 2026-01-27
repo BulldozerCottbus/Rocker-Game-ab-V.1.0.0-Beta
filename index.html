@@ -27,6 +27,7 @@ body{margin:0;background:var(--bg);color:#fff;overflow:hidden}
 #hud{
   display:flex;
   justify-content:space-between;
+  align-items:center;
   padding:8px 12px;
   background:#111;
   border-bottom:1px solid #222;
@@ -70,7 +71,7 @@ body{margin:0;background:var(--bg);color:#fff;overflow:hidden}
   border-bottom:2px solid var(--accent);
 }
 
-/* UI Elements */
+/* UI */
 button{
   background:var(--accent);
   border:none;
@@ -79,10 +80,11 @@ button{
   border-radius:8px;
   margin-top:6px;
 }
+button.secondary{background:#333}
 .card{
   background:var(--card);
-  border-radius:10px;
-  padding:12px;
+  border-radius:12px;
+  padding:14px;
   margin-bottom:12px;
 }
 .region{
@@ -98,11 +100,17 @@ button{
   align-items:center;
   height:100%;
 }
-input,select{
+
+/* Create */
+.create-card{width:100%;max-width:320px}
+.create-card input,
+.create-card select{
   width:100%;
-  padding:10px;
+  padding:8px 10px;
   border-radius:8px;
   border:none;
+  background:#111;
+  color:#fff;
   margin-bottom:10px;
 }
 </style>
@@ -124,7 +132,7 @@ input,select{
     <h2>Charaktere</h2>
     <div id="charList"></div>
     <button onclick="go('create')">+ Neuer Charakter</button>
-    <button onclick="go('start')">Zurück</button>
+    <button class="secondary" onclick="go('start')">Zurück</button>
   </div>
 </section>
 
@@ -132,20 +140,21 @@ input,select{
 <section id="create" class="screen">
   <div class="center">
     <h2>Neuer Charakter</h2>
-    <input id="nameInput" placeholder="Name (Liga 4)">
-    <select id="ligaInput" onchange="updateCreateUI()">
-      <option value="4">Liga 4</option>
-      <option value="3">Liga 3</option>
-    </select>
-    <select id="mcSelect" style="display:none"></select>
-    <button onclick="createChar()">Erstellen</button>
-    <button onclick="go('chars')">Abbrechen</button>
+    <div class="card create-card">
+      <input id="nameInput" placeholder="Name (Liga 4)">
+      <select id="ligaInput" onchange="updateCreateUI()">
+        <option value="4">Liga 4 – Eigenständig</option>
+        <option value="3">Liga 3 – Supporter</option>
+      </select>
+      <select id="mcSelect" style="display:none"></select>
+      <button onclick="createChar()">Erstellen</button>
+      <button class="secondary" onclick="go('chars')">Abbrechen</button>
+    </div>
   </div>
 </section>
 
 <!-- GAME -->
 <section id="game" class="screen">
-
   <div id="hud">
     <div>💶 <span id="hudMoney">0</span></div>
     <div>👥 <span id="hudMembers">0</span></div>
@@ -166,12 +175,11 @@ input,select{
     <button id="btn-shop" onclick="openPanel('shop')">🏪</button>
     <button id="btn-police" onclick="openPanel('police')">🚓</button>
   </div>
-
 </section>
 
 <script>
-/* DATA */
-const SAVE_KEY="rocker_empire_ui_v11";
+/* ================= DATA ================= */
+const SAVE_KEY="rocker_empire_master_ui";
 
 const MCs={
   "Hells Angels MC":{loyalty:40},
@@ -180,19 +188,28 @@ const MCs={
   "Pagans MC":{loyalty:30},
   "Sons of Silence":{loyalty:25}
 };
+
 const REGIONS=[
   {name:"Berlin",owner:"Hells Angels MC"},
+  {name:"Brandenburg",owner:"Hells Angels MC"},
   {name:"Hamburg",owner:"Bandidos MC"},
   {name:"NRW",owner:"Outlaws MC"},
   {name:"Bayern",owner:"Pagans MC"},
   {name:"Sachsen",owner:"Sons of Silence"}
 ];
-const LIGA3_MCS=["Bulldozer Cottbus","Red Devils Support"];
+
+const LIGA3_MCS=[
+  "Bulldozer Cottbus",
+  "Red Devils Support",
+  "Support 81",
+  "Free Riders",
+  "Independent Brotherhood"
+];
 
 let state={chars:[]};
 let current=null;
 
-/* NAV */
+/* ================= NAV ================= */
 function go(id){
   document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
   document.getElementById(id).classList.add("active");
@@ -204,11 +221,11 @@ function openPanel(name){
   document.getElementById("btn-"+name).classList.add("active");
 }
 
-/* SAVE */
+/* ================= SAVE ================= */
 function save(){localStorage.setItem(SAVE_KEY,JSON.stringify(state))}
 function load(){const d=localStorage.getItem(SAVE_KEY);if(d)state=JSON.parse(d)}
 
-/* CREATE */
+/* ================= CREATE ================= */
 function updateCreateUI(){
   mcSelect.style.display=ligaInput.value==3?"block":"none";
   if(ligaInput.value==3){
@@ -220,22 +237,23 @@ function createChar(){
   const liga=+ligaInput.value;
   state.chars.push({
     liga,
-    name:liga==4?(nameInput.value||"Rider"):mcSelect.value,
-    mc:liga==4?"Eigenständig":mcSelect.value,
-    money:liga==4?500:2000,
-    members:liga==4?1:6,
-    influence:liga==4?0:20,
+    name:liga===4?(nameInput.value||"Rider"):mcSelect.value,
+    mc:liga===4?"Eigenständig":mcSelect.value,
+    money:liga===4?500:2000,
+    members:liga===4?1:6,
+    influence:liga===4?0:20,
     weapons:0,
+    weed:0,
     heat:0
   });
   save();renderChars();go("chars");
 }
 
-/* UI */
+/* ================= UI ================= */
 function renderChars(){
   charList.innerHTML="";
   state.chars.forEach((c,i)=>{
-    charList.innerHTML+=`<button onclick="startGame(${i})">${c.name}</button>`;
+    charList.innerHTML+=`<button onclick="startGame(${i})">${c.name} (Liga ${c.liga})</button>`;
   });
 }
 function startGame(i){
@@ -272,8 +290,8 @@ function renderGame(){
     <div class="card">
       <strong>${mc}</strong><br>
       Loyalität: ${MCs[mc].loyalty}%<br>
-      <button onclick="buyWeed('${mc}')">🌿 Gras kaufen</button>
-      <button onclick="buyWeapon('${mc}')">🔫 Waffe kaufen</button>
+      <button onclick="buyWeed('${mc}')">🌿 Gras kaufen (500 €)</button>
+      <button onclick="buyWeapon('${mc}')">🔫 Waffe kaufen (1000 €)</button>
     </div>
   `).join("");
 
@@ -285,11 +303,11 @@ function renderGame(){
   `;
 }
 
-/* ACTIONS */
+/* ================= ACTIONS ================= */
 function buyWeed(mc){
   const p=state.chars[current];
   if(p.money<500)return;
-  p.money-=500;p.heat+=5;MCs[mc].loyalty+=3;
+  p.money-=500;p.weed++;p.heat+=5;MCs[mc].loyalty+=3;
   save();renderGame();
 }
 function buyWeapon(mc){
@@ -300,13 +318,13 @@ function buyWeapon(mc){
 }
 function bribe(){
   const p=state.chars[current];
-  const cost=p.liga==4?1000:3000;
+  const cost=p.liga===4?1000:3000;
   if(p.money<cost)return;
   p.money-=cost;p.heat=Math.max(0,p.heat-25);
   save();renderGame();
 }
 
-/* INIT */
+/* ================= INIT ================= */
 load();
 renderChars();
 </script>
