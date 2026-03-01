@@ -1,1281 +1,1436 @@
-(() => {
-  "use strict";
+/* Slot Studio v3
+   - Admin gate: Ctrl+Alt+# + Code => Builder + RTP sichtbar
+   - Multi slots
+   - Kein Scroll / Touch gesperrt via CSS
+   - Gewinne: auch 3 gleiche "in der Mitte" werden erkannt (Runs überall auf der Linie)
+   - PowerSpins: Popup Freispiele (bei Feature-Trigger)
+     - Ende: wenn 0 Gewinn => weg
+     - wenn genug Gewinn => "Nochmal Chance" (Retry)
+   - Triple Chance: Vollbild => Grün/Rot Feature (wie vorher)
+*/
 
-  /* =========================
-     Storage / State
-  ========================= */
-  const STORAGE_KEY = "multiSlotSystem.v3";
-  const DAY_MS = 24 * 60 * 60 * 1000;
+const $ = (id) => document.getElementById(id);
 
-  const defaultState = {
-    balance: 20.00,
-    bet: 0.10,
-    selectedSlotId: "lucky_pharaoh",
-    lastWheelAt: 0,
-    customSlots: {},
-  };
+/* =========================
+   ADMIN
+========================= */
+// ✅ HIER deinen Code setzen:
+const ADMIN_CODE = "1234";
 
-  function loadState() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return { ...defaultState };
-      const parsed = JSON.parse(raw);
-      return {
-        ...defaultState,
-        ...parsed,
-        customSlots: parsed.customSlots && typeof parsed.customSlots === "object" ? parsed.customSlots : {},
-      };
-    } catch {
-      return { ...defaultState };
-    }
+const LS_ADMIN = "slotStudio.admin.v1";
+let isAdmin = JSON.parse(localStorage.getItem(LS_ADMIN) || "false");
+
+/* =========================
+   RNG + Utils
+========================= */
+function randInt(maxExclusive) {
+  const a = new Uint32Array(1);
+  crypto.getRandomValues(a);
+  return a[0] % maxExclusive;
+}
+function clampInt(v, min, max){
+  v = Number(v);
+  if (Number.isNaN(v)) v = min;
+  v = v|0;
+  return Math.max(min, Math.min(max, v));
+}
+function clampRow(n) {
+  n = Number(n);
+  if (Number.isNaN(n)) return 1;
+  return Math.min(2, Math.max(0, n|0));
+}
+function escapeHtml(str){
+  return String(str).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
+}
+function looksLikeUrl(x) {
+  return typeof x === "string" && (x.startsWith("http://") || x.startsWith("https://") || x.startsWith("data:"));
+}
+function wait(ms){ return new Promise(res => setTimeout(res, ms)); }
+
+/* =========================
+   Slot Definitions
+========================= */
+const DEFAULT_DEF = {
+  name: "Arcade Deluxe",
+  startCredits: 200,
+  accent: "#00e5ff",
+  rows: 3,
+  reels: 5,
+  reelMode: "independent", // independent | stacked
+  features: {
+    // ✅ PowerSpins (Popup)
+    powerSpinsEnabled: true,
+    powerSpinsCount: 10,
+    powerRetryX: 10,         // nochmal chance ab x * Einsatz (SessionWin >= totalBet * X)
+    powerRetryCount: 5,
+
+    // ✅ Triple Chance
+    ttChanceEnabled: false,
+    ttGreens: 3,
+    ttReds: 1,
+    ttMaxRounds: 0
+  },
+  symbols: [
+    { id:"cherry", icon:"🍒", name:"Cherry",  weight:18, pay:{3:5, 4:20, 5:120} },
+    { id:"lemon",  icon:"🍋", name:"Lemon",   weight:18, pay:{3:5, 4:18, 5:100} },
+    { id:"bell",   icon:"🔔", name:"Bell",    weight:14, pay:{3:8, 4:30, 5:160} },
+    { id:"star",   icon:"⭐",  name:"Star",    weight:12, pay:{3:10,4:40, 5:220} },
+    { id:"diamond",icon:"💎",  name:"Diamond", weight:8,  pay:{3:14,4:70, 5:350} },
+    { id:"seven",  icon:"7️⃣", name:"Seven",   weight:4,  pay:{3:25,4:120,5:700} },
+  ],
+  lines: [
+    { id:"mid",  name:"Middle", pattern:[1,1,1,1,1], enabled:true },
+    { id:"top",  name:"Top",    pattern:[0,0,0,0,0], enabled:true },
+    { id:"bot",  name:"Bottom", pattern:[2,2,2,2,2], enabled:true },
+    { id:"v",    name:"V",      pattern:[0,1,2,1,0], enabled:true },
+    { id:"cap",  name:"^",      pattern:[2,1,0,1,2], enabled:true },
+    { id:"zig",  name:"Zigzag", pattern:[1,0,1,2,1], enabled:false },
+    { id:"zag",  name:"Zagzag", pattern:[1,2,1,0,1], enabled:false },
+  ]
+};
+
+/* ✅ Triple Chance Slot: 3 Walzen */
+const TTC_DEF = {
+  ...structuredClone(DEFAULT_DEF),
+  name: "Triple Chance (3 Walzen)",
+  startCredits: 250,
+  accent: "#00ffb3",
+  reels: 3,
+  reelMode: "stacked",
+  features: {
+    powerSpinsEnabled: false,
+    powerSpinsCount: 10,
+    powerRetryX: 10,
+    powerRetryCount: 5,
+
+    ttChanceEnabled: true,
+    ttGreens: 3,
+    ttReds: 1,
+    ttMaxRounds: 0
+  },
+  symbols: [
+    { id:"plum",   icon:"🫐", name:"Pflaume", weight:20, pay:{3:8,  4:0, 5:0} },
+    { id:"cherry", icon:"🍒", name:"Kirsche", weight:22, pay:{3:6,  4:0, 5:0} },
+    { id:"lemon",  icon:"🍋", name:"Zitrone", weight:24, pay:{3:5,  4:0, 5:0} },
+    { id:"bell",   icon:"🔔", name:"Glocke",  weight:16, pay:{3:10, 4:0, 5:0} },
+    { id:"diamond",icon:"💚", name:"Diamant", weight:10, pay:{3:14, 4:0, 5:0} },
+    { id:"seven",  icon:"7️⃣", name:"7",      weight:8,  pay:{3:25, 4:0, 5:0} },
+  ],
+  lines: [
+    { id:"mid", name:"Middle", pattern:[1,1,1], enabled:true },
+    { id:"top", name:"Top",    pattern:[0,0,0], enabled:true },
+    { id:"bot", name:"Bottom", pattern:[2,2,2], enabled:true },
+    { id:"d1",  name:"Diag ↘", pattern:[0,1,2], enabled:true },
+    { id:"d2",  name:"Diag ↗", pattern:[2,1,0], enabled:true },
+  ]
+};
+
+/* =========================
+   Normalize
+========================= */
+function normalizePattern(pat, reels){
+  const out = [];
+  const src = Array.isArray(pat) ? pat : [];
+  for (let i=0;i<reels;i++){
+    const v = (i < src.length) ? src[i] : 1;
+    out.push(clampRow(v));
   }
+  return out;
+}
 
-  function saveState() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }
+function normalizeDef(def) {
+  const base = structuredClone(DEFAULT_DEF);
+  const out = structuredClone(base);
 
-  let state = loadState();
+  if (def && typeof def === "object") {
+    out.name = String(def.name ?? out.name);
+    out.startCredits = Math.max(0, Number(def.startCredits ?? out.startCredits) | 0);
+    out.accent = String(def.accent ?? out.accent);
+    out.rows = 3;
 
-  /* =========================
-     RNG
-  ========================= */
-  function rand01() {
-    const buf = new Uint32Array(1);
-    crypto.getRandomValues(buf);
-    return buf[0] / 2 ** 32;
-  }
+    const r = Number(def.reels);
+    out.reels = (r === 3 || r === 5) ? r : base.reels;
 
-  function randInt(minIncl, maxIncl) {
-    return minIncl + Math.floor(rand01() * (maxIncl - minIncl + 1));
-  }
+    out.reelMode = (def.reelMode === "stacked") ? "stacked" : "independent";
 
-  function weightedChoice(weightMap) {
-    const entries = Object.entries(weightMap).filter(([, w]) => Number(w) > 0);
-    let total = 0;
-    for (const [, w] of entries) total += Number(w);
-    if (total <= 0) return entries.length ? entries[0][0] : null;
+    out.features = {
+      powerSpinsEnabled: !!def.features?.powerSpinsEnabled,
+      powerSpinsCount: clampInt(def.features?.powerSpinsCount ?? 10, 1, 99),
+      powerRetryX: clampInt(def.features?.powerRetryX ?? 10, 1, 200),
+      powerRetryCount: clampInt(def.features?.powerRetryCount ?? 5, 1, 99),
 
-    let pick = rand01() * total;
-    for (const [k, w] of entries) {
-      pick -= Number(w);
-      if (pick <= 0) return k;
-    }
-    return entries[entries.length - 1][0];
-  }
-
-  /* =========================
-     Audio Engine (Kulisse + Reel + Win/Lose)
-  ========================= */
-  class AudioEngine {
-    constructor() {
-      this.ctx = null;
-      this.master = null;
-      this.ambGain = null;
-      this.ambOsc = null;
-      this.started = false;
-    }
-
-    ensure() {
-      if (this.started) return;
-
-      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-      this.master = this.ctx.createGain();
-      this.master.gain.value = 0.22;
-      this.master.connect(this.ctx.destination);
-
-      this.ambGain = this.ctx.createGain();
-      this.ambGain.gain.value = 0.06;
-      this.ambGain.connect(this.master);
-
-      this.ambOsc = this.ctx.createOscillator();
-      this.ambOsc.type = "sine";
-      this.ambOsc.frequency.value = 55;
-      this.ambOsc.connect(this.ambGain);
-      this.ambOsc.start();
-
-      const lfo = this.ctx.createOscillator();
-      lfo.type = "sine";
-      lfo.frequency.value = 0.12;
-
-      const lfoGain = this.ctx.createGain();
-      lfoGain.gain.value = 0.02;
-      lfo.connect(lfoGain);
-      lfoGain.connect(this.ambGain.gain);
-      lfo.start();
-
-      this.started = true;
-    }
-
-    blip(freq, dur = 0.06, vol = 0.12, type = "square") {
-      if (!this.started) return;
-
-      const o = this.ctx.createOscillator();
-      const g = this.ctx.createGain();
-
-      o.type = type;
-      o.frequency.value = freq;
-      g.gain.value = vol;
-
-      o.connect(g);
-      g.connect(this.master);
-
-      const t = this.ctx.currentTime;
-      g.gain.setValueAtTime(vol, t);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-
-      o.start(t);
-      o.stop(t + dur);
-    }
-
-    reelTick() {
-      this.blip(520 + randInt(-40, 40), 0.05, 0.08, "square");
-    }
-
-    reelStop() {
-      this.blip(220, 0.08, 0.10, "triangle");
-    }
-
-    win() {
-      this.blip(740, 0.10, 0.14, "sine");
-      setTimeout(() => this.blip(980, 0.10, 0.14, "sine"), 90);
-    }
-
-    lose() {
-      this.blip(140, 0.12, 0.11, "sawtooth");
-    }
-  }
-
-  const audio = new AudioEngine();
-
-  /* =========================
-     Slot Config (Lucky Pharaoh)
-     Paytable: MULTIPLIKATOR × GESAMTEINSATZ
-  ========================= */
-  const SYM = {
-    MASK: "MASK",   // 🎭 wild/mystery
-    DIA: "DIA",     // 💎
-    RUB: "RUB",     // 🛑 Rubin
-    SAP: "SAP",     // 💠 Saphir
-    EME: "EME",     // ❇️ Smaragd
-    A: "A",
-    K: "K",
-    Q: "Q",
-    J: "J",
-    T10: "10",
-  };
-
-  function makeLuckyPharaohSlot() {
-    return {
-      id: "lucky_pharaoh",
-      name: "Lucky Pharaoh",
-      reels: 5,
-      rows: 3,
-      paylines: 10,
-      features: {
-        powerSpins: true,
-        powerTriggerMultiplier: 4,
-        mysterySymbol: SYM.MASK,
-        wildMode: true,
-        wildExpandChancePower: 0.06,
-      },
-      symbols: [
-        { key: SYM.MASK, label: "🎭" },
-        { key: SYM.DIA,  label: "💎" },
-        { key: SYM.RUB,  label: "🛑" },
-        { key: SYM.SAP,  label: "💠" },
-        { key: SYM.EME,  label: "❇️" },
-        { key: SYM.A,    label: "A" },
-        { key: SYM.K,    label: "K" },
-        { key: SYM.Q,    label: "Q" },
-        { key: SYM.J,    label: "J" },
-        { key: SYM.T10,  label: "10" },
-      ],
-      weights: {
-        base: {
-          [SYM.MASK]: 7,
-          [SYM.DIA]: 5,
-          [SYM.RUB]: 8,
-          [SYM.SAP]: 9,
-          [SYM.EME]: 10,
-          [SYM.A]: 14,
-          [SYM.K]: 14,
-          [SYM.Q]: 14,
-          [SYM.J]: 14,
-          [SYM.T10]: 16,
-        },
-        power: {
-          [SYM.MASK]: 7,
-          [SYM.DIA]: 5,
-          [SYM.RUB]: 9,
-          [SYM.SAP]: 9,
-          [SYM.EME]: 11,
-          [SYM.A]: 12,
-          [SYM.K]: 12,
-          [SYM.Q]: 15,
-          [SYM.J]: 14,
-          [SYM.T10]: 15,
-        }
-      },
-      paytable: {
-        [SYM.DIA]: { 3: 5,   4: 10,  5: 50 },
-        [SYM.RUB]: { 3: 4,   4: 10,  5: 40 },
-        [SYM.SAP]: { 3: 2,   4: 6,   5: 30 },
-        [SYM.EME]: { 3: 2,   4: 6,   5: 30 },
-        [SYM.A]:   { 3: 1,   4: 4,   5: 20 },
-        [SYM.K]:   { 3: 1,   4: 4,   5: 20 },
-        [SYM.Q]:   { 3: 0.5, 4: 2,   5: 10 },
-        [SYM.J]:   { 3: 0.5, 4: 2,   5: 10 },
-        [SYM.T10]: { 3: 0.5, 4: 2,   5: 10 },
-      }
+      ttChanceEnabled: !!def.features?.ttChanceEnabled,
+      ttGreens: clampInt(def.features?.ttGreens ?? 3, 1, 20),
+      ttReds: clampInt(def.features?.ttReds ?? 1, 1, 20),
+      ttMaxRounds: clampInt(def.features?.ttMaxRounds ?? 0, 0, 99)
     };
-  }
 
-  function getAllSlots() {
-    const defaults = { lucky_pharaoh: makeLuckyPharaohSlot() };
-    return { ...defaults, ...(state.customSlots || {}) };
-  }
-
-  /* =========================
-     Paylines
-  ========================= */
-  const PAYLINES = [
-    [1,1,1,1,1],
-    [0,0,0,0,0],
-    [2,2,2,2,2],
-    [0,1,2,1,0],
-    [2,1,0,1,2],
-    [0,0,1,0,0],
-    [2,2,1,2,2],
-    [1,0,0,0,1],
-    [1,2,2,2,1],
-    [0,1,1,1,0],
-  ];
-
-  /* =========================
-     DOM
-  ========================= */
-  const $ = (id) => document.getElementById(id);
-
-  const balanceEl = $("balance");
-  const slotSelect = $("slotSelect");
-  const betSelect = $("betSelect");
-  const spinBtn = $("spinBtn");
-  const autoBtn = $("autoBtn");
-
-  const wheelBtn = $("wheelBtn");
-  const wheelCooldownText = $("wheelCooldownText");
-
-  const baseBoardEl = $("baseBoard");
-  const statusText = $("statusText");
-  const lastWinEl = $("lastWin");
-  const eventBox = $("eventBox");
-  const slotMetaEl = $("slotMeta");
-
-  const powerPanel = $("powerPanel");
-  const powerMeta = $("powerMeta");
-  const powerStatus = $("powerStatus");
-  const powerWinEl = $("powerWin");
-  const pBoards = [$("pBoard1"), $("pBoard2"), $("pBoard3"), $("pBoard4")];
-
-  const powerModalOverlay = $("powerModalOverlay");
-  const powerModalText = $("powerModalText");
-  const powerBuyRange = $("powerBuyRange");
-  const powerBuySpins = $("powerBuySpins");
-  const powerBuyCost = $("powerBuyCost");
-  const takeWinBtn = $("takeWinBtn");
-  const buyPowerBtn = $("buyPowerBtn");
-  const closePowerModal = $("closePowerModal");
-
-  const wheelModalOverlay = $("wheelModalOverlay");
-  const wheel = $("wheel");
-  const wheelInfo = $("wheelInfo");
-  const wheelReadyText = $("wheelReadyText");
-  const spinWheelBtn = $("spinWheelBtn");
-  const closeWheelModal = $("closeWheelModal");
-
-  const adminOverlay = $("adminOverlay");
-  const closeAdmin = $("closeAdmin");
-  const adminBalanceInput = $("adminBalanceInput");
-  const adminSetBalanceBtn = $("adminSetBalanceBtn");
-  const adminResetWheelBtn = $("adminResetWheelBtn");
-  const adminExportDataBtn = $("adminExportDataBtn");
-  const adminResetAllBtn = $("adminResetAllBtn");
-
-  const builderNewBtn = $("builderNewBtn");
-  const builderCloneBtn = $("builderCloneBtn");
-  const builderDeleteBtn = $("builderDeleteBtn");
-  const builderSlotSelect = $("builderSlotSelect");
-  const builderJson = $("builderJson");
-  const builderSaveBtn = $("builderSaveBtn");
-  const builderExportSlotBtn = $("builderExportSlotBtn");
-  const builderImportSlotBtn = $("builderImportSlotBtn");
-
-  /* =========================
-     Helpers
-  ========================= */
-  const WILD = "__WILD__";
-  const ADMIN_PASSWORD = "1403";
-
-  function eur(n) {
-    const x = Number(n || 0);
-    return "€" + x.toFixed(2);
-  }
-
-  function setStatus(msg) {
-    statusText.textContent = msg;
-  }
-
-  function setEvent(msg) {
-    eventBox.innerHTML = msg;
-  }
-
-  function getSelectedSlot() {
-    const all = getAllSlots();
-    return all[state.selectedSlotId] || all["lucky_pharaoh"];
-  }
-
-  function symbolDef(slot, key) {
-    return slot.symbols.find(s => s.key === key) || { key, label: key };
-  }
-
-  function safeClassKey(key) {
-    return String(key).replace(/[^a-zA-Z0-9_-]/g, "");
-  }
-
-  function renderBalance() {
-    balanceEl.textContent = eur(state.balance);
-  }
-
-  function renderTopMeta() {
-    const slot = getSelectedSlot();
-    slotMetaEl.textContent =
-      `${slot.reels}×${slot.rows} · ${slot.paylines} Linien · Paytable = Multiplikator × Gesamteinsatz · Power ≥ ${slot.features.powerTriggerMultiplier}×`;
-  }
-
-  function fillBetOptions() {
-    const bets = [0.10,0.20,0.30,0.40,0.50,0.60,0.70,0.80,0.90,1.00,2.00,3.00,4.00,5.00,10.00];
-    betSelect.innerHTML = "";
-
-    for (const b of bets) {
-      const opt = document.createElement("option");
-      opt.value = String(b);
-      opt.textContent = eur(b);
-      betSelect.appendChild(opt);
+    if (Array.isArray(def.symbols) && def.symbols.length >= 3) {
+      out.symbols = def.symbols.map((s, i) => ({
+        id: String(s.id ?? `s${i}`),
+        icon: String(s.icon ?? "❓"),
+        name: String(s.name ?? "Symbol"),
+        weight: Math.max(1, Number(s.weight ?? 10) | 0),
+        pay: {
+          3: Math.max(0, Number(s.pay?.[3] ?? 0) | 0),
+          4: Math.max(0, Number(s.pay?.[4] ?? 0) | 0),
+          5: Math.max(0, Number(s.pay?.[5] ?? 0) | 0),
+        }
+      }));
     }
 
-    if (!bets.includes(Number(state.bet))) state.bet = 0.10;
-    betSelect.value = String(state.bet);
-  }
-
-  function fillSlotOptions() {
-    const all = getAllSlots();
-
-    slotSelect.innerHTML = "";
-    for (const [id, cfg] of Object.entries(all)) {
-      const opt = document.createElement("option");
-      opt.value = id;
-      opt.textContent = cfg.name + (id === "lucky_pharaoh" ? " (Default)" : "");
-      slotSelect.appendChild(opt);
-    }
-
-    if (!all[state.selectedSlotId]) state.selectedSlotId = "lucky_pharaoh";
-    slotSelect.value = state.selectedSlotId;
-
-    builderSlotSelect.innerHTML = "";
-    for (const [id, cfg] of Object.entries(all)) {
-      const opt = document.createElement("option");
-      opt.value = id;
-      opt.textContent = cfg.name + (state.customSlots[id] ? " (Custom)" : " (Built-in)");
-      builderSlotSelect.appendChild(opt);
-    }
-    builderSlotSelect.value = state.selectedSlotId;
-  }
-
-  function updateWheelCooldownUI() {
-    const now = Date.now();
-    const next = (state.lastWheelAt || 0) + DAY_MS;
-
-    if (now >= next) {
-      wheelCooldownText.textContent = "Wheel: bereit";
-      wheelBtn.classList.add("primary");
-    } else {
-      wheelBtn.classList.remove("primary");
-      const ms = next - now;
-      const h = Math.floor(ms / (60 * 60 * 1000));
-      const m = Math.floor((ms % (60 * 60 * 1000)) / (60 * 1000));
-      const s = Math.floor((ms % (60 * 1000)) / 1000);
-      wheelCooldownText.textContent = `Wheel: in ${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+    if (Array.isArray(def.lines) && def.lines.length >= 1) {
+      out.lines = def.lines.map((l, i) => ({
+        id: String(l.id ?? `l${i}`),
+        name: String(l.name ?? `Line ${i+1}`),
+        pattern: normalizePattern(l.pattern, out.reels),
+        enabled: !!l.enabled
+      }));
     }
   }
 
-  /* =========================
-     Board build
-  ========================= */
-  function buildBoard(boardEl, slot) {
-    boardEl.innerHTML = "";
-    const cells = Array.from({ length: slot.rows }, () => Array.from({ length: slot.reels }, () => null));
+  if (!Array.isArray(out.lines) || out.lines.length === 0) {
+    out.lines = [{ id:"mid", name:"Middle", pattern: normalizePattern([1,1,1,1,1], out.reels), enabled:true }];
+  }
+  return out;
+}
 
-    for (let r = 0; r < slot.rows; r++) {
-      for (let c = 0; c < slot.reels; c++) {
-        const cell = document.createElement("div");
-        cell.className = "symbol";
+/* =========================
+   Storage (Multi Slots)
+========================= */
+const LS_SLOTS_KEY = "slotStudio.slots.v3";
+const LS_CURRENT_SLOT = "slotStudio.currentSlotId.v3";
+const LS_STATE_MAP = "slotStudio.stateMap.v3";
 
-        const icon = document.createElement("div");
-        icon.className = "icon";
-        icon.textContent = "?";
+function loadSlots() {
+  try {
+    const raw = localStorage.getItem(LS_SLOTS_KEY);
+    if (!raw) {
+      const init = [
+        { id: "slot_arcade", def: normalizeDef(DEFAULT_DEF) },
+        { id: "slot_triple", def: normalizeDef(TTC_DEF) }
+      ];
+      localStorage.setItem(LS_SLOTS_KEY, JSON.stringify(init));
+      return init;
+    }
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr) || arr.length === 0) throw new Error("bad slots");
+    return arr.map(s => ({ id: String(s.id), def: normalizeDef(s.def) }));
+  } catch {
+    const init = [
+      { id: "slot_arcade", def: normalizeDef(DEFAULT_DEF) },
+      { id: "slot_triple", def: normalizeDef(TTC_DEF) }
+    ];
+    localStorage.setItem(LS_SLOTS_KEY, JSON.stringify(init));
+    return init;
+  }
+}
+function saveSlots() {
+  localStorage.setItem(LS_SLOTS_KEY, JSON.stringify(slots, null, 2));
+}
+function loadStateMap() {
+  try {
+    const raw = localStorage.getItem(LS_STATE_MAP);
+    if (!raw) return {};
+    const obj = JSON.parse(raw);
+    return (obj && typeof obj === "object") ? obj : {};
+  } catch { return {}; }
+}
+function saveStateMap() {
+  localStorage.setItem(LS_STATE_MAP, JSON.stringify(stateMap));
+}
 
-        cell.appendChild(icon);
-        cell.dataset.r = String(r);
-        cell.dataset.c = String(c);
+/* =========================
+   DOM
+========================= */
+const tabPlay = $("tabPlay");
+const tabBuilder = $("tabBuilder");
+const viewPlay = $("viewPlay");
+const viewBuilder = $("viewBuilder");
 
-        boardEl.appendChild(cell);
-        cells[r][c] = cell;
+const slotNameEl = $("slotName");
+const slotSelect = $("slotSelect");
+const adminPill = $("adminPill");
+
+const creditsEl = $("credits");
+const betPerLineEl = $("betPerLine");
+const lineCountEl = $("lineCount");
+const reelsEl = $("reels");
+const msgEl = $("msg");
+const winsEl = $("wins");
+
+const spinBtn = $("spinBtn");
+const autoBtn = $("autoBtn");
+const simBtn = $("simBtn");
+const betDown = $("betDown");
+const betUp = $("betUp");
+const soundToggle = $("soundToggle");
+const resetCredits = $("resetCredits");
+
+/* Builder */
+const bSlotSelect = $("bSlotSelect");
+const newSlotBtn = $("newSlotBtn");
+const dupSlotBtn = $("dupSlotBtn");
+const delSlotBtn = $("delSlotBtn");
+
+const bName = $("bName");
+const bStartCredits = $("bStartCredits");
+const bAccent = $("bAccent");
+const bReels = $("bReels");
+const bReelMode = $("bReelMode");
+
+const bPSEnabled = $("bPSEnabled");
+const bPSCount = $("bPSCount");
+const bPSRetrigX = $("bPSRetrigX");
+const bPSRetryCount = $("bPSRetryCount");
+
+const bTTEnabled = $("bTTEnabled");
+const bTTGreens = $("bTTGreens");
+const bTTReds = $("bTTReds");
+const bTTMaxRounds = $("bTTMaxRounds");
+
+const bLines = $("bLines");
+const symbolTbody = $("symbolTbody");
+const addSymbolBtn = $("addSymbol");
+const exportBtn = $("exportBtn");
+const importBtn = $("importBtn");
+const saveBtn = $("saveBtn");
+const jsonBox = $("jsonBox");
+
+/* Admin modal */
+const adminModal = $("adminModal");
+const adminCode = $("adminCode");
+const adminUnlockBtn = $("adminUnlockBtn");
+const adminLogoutBtn = $("adminLogoutBtn");
+const adminCloseBtn = $("adminCloseBtn");
+const adminStatus = $("adminStatus");
+
+/* PowerSpins modal */
+const psModal = $("psModal");
+const psLeftEl = $("psLeft");
+const psWinEl = $("psWin");
+const psBetLockEl = $("psBetLock");
+const psNeedEl = $("psNeed");
+const psSpinBtn = $("psSpinBtn");
+const psEndBtn = $("psEndBtn");
+const psRetryBtn = $("psRetryBtn");
+const psMsg = $("psMsg");
+
+/* Triple Chance modal */
+const ttcModal = $("ttcModal");
+const ttcBaseEl = $("ttcBase");
+const ttcPendingEl = $("ttcPending");
+const ttcGreensEl = $("ttcGreens");
+const ttcRoundEl = $("ttcRound");
+const ttcBoard = $("ttcBoard");
+const ttcLamps = $("ttcLamps");
+const ttcSpinBtn = $("ttcSpinBtn");
+const ttcCollectBtn = $("ttcCollectBtn");
+const ttcMsg = $("ttcMsg");
+
+/* =========================
+   Sounds (WebAudio Synth)
+========================= */
+let audioOn = true;
+let AC = null;
+
+function ensureAudio() {
+  if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)();
+  return AC;
+}
+function beep(freq, durMs, type="sine", gain=0.06) {
+  if (!audioOn) return;
+  ensureAudio();
+  const t0 = AC.currentTime;
+  const osc = AC.createOscillator();
+  const g = AC.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(gain, t0 + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + durMs/1000);
+
+  osc.connect(g).connect(AC.destination);
+  osc.start(t0);
+  osc.stop(t0 + durMs/1000 + 0.03);
+}
+function winJingle() {
+  if (!audioOn) return;
+  beep(659, 120, "triangle", 0.07);
+  setTimeout(()=>beep(784, 120, "triangle", 0.07), 120);
+  setTimeout(()=>beep(988, 160, "triangle", 0.08), 240);
+}
+function spinTick(){ beep(160, 35, "square", 0.03); }
+function stopTick(){ beep(220, 70, "sawtooth", 0.04); }
+function greenSound(){ beep(880, 90, "triangle", 0.08); }
+function redSound(){ beep(140, 160, "sawtooth", 0.09); }
+function psSound(){ beep(520, 80, "triangle", 0.06); }
+
+/* =========================
+   Runtime state
+========================= */
+let slots = loadSlots();
+let currentSlotId = localStorage.getItem(LS_CURRENT_SLOT) || slots[0].id;
+
+let stateMap = loadStateMap();
+let def = getCurrentDef();
+let state = getCurrentState();
+
+let weightedBag = buildWeightedBag();
+let cellMatrix = []; // [row][reel]
+let spinning = false;
+let autoTimer = null;
+
+/* PowerSpins state */
+let ps = {
+  active: false,
+  spinsLeft: 0,
+  sessionWin: 0,
+  betLock: 0,
+  retryNeed: 0,
+  retryCount: 0,
+  allowRetry: false
+};
+
+/* Triple Chance state */
+let ttc = {
+  active: false,
+  basePayout: 0,
+  pending: 0,
+  greens: 0,
+  round: 0,
+  maxRounds: 0,
+  greensPerRound: 3,
+  redsPerRound: 1
+};
+
+/* =========================
+   Core helpers
+========================= */
+function getCurrentDef(){
+  const slot = slots.find(s => s.id === currentSlotId) || slots[0];
+  currentSlotId = slot.id;
+  return slot.def;
+}
+function setCurrentDef(newDef){
+  const idx = slots.findIndex(s => s.id === currentSlotId);
+  if (idx >= 0) {
+    slots[idx].def = normalizeDef(newDef);
+    def = slots[idx].def;
+    saveSlots();
+  }
+}
+function getCurrentState(){
+  const st = stateMap[currentSlotId];
+  if (st && typeof st.credits === "number") return st;
+  const init = { credits: def.startCredits, betPerLine: 1, auto: false };
+  stateMap[currentSlotId] = init;
+  saveStateMap();
+  return init;
+}
+function saveCurrentState(){
+  stateMap[currentSlotId] = state;
+  saveStateMap();
+}
+
+function applyAccent() {
+  document.documentElement.style.setProperty("--accent", def.accent || "#00e5ff");
+}
+function enabledLines() {
+  return def.lines.filter(l => l.enabled);
+}
+function getSymbolById(id) {
+  return def.symbols.find(s => s.id === id) || def.symbols[0];
+}
+function buildWeightedBag() {
+  const bag = [];
+  for (const s of def.symbols) {
+    const w = Math.max(1, s.weight|0);
+    for (let i=0;i<w;i++) bag.push(s.id);
+  }
+  return bag.length ? bag : def.symbols.map(s=>s.id);
+}
+function randomSymbolFromBag() {
+  return weightedBag[randInt(weightedBag.length)];
+}
+
+function setMsg(t){ msgEl.textContent = t; }
+
+function renderCell(cell, symId) {
+  const s = getSymbolById(symId);
+  const iconEl = cell.querySelector(".icon");
+  const labelEl = cell.querySelector(".label");
+
+  if (looksLikeUrl(s.icon)) {
+    iconEl.textContent = "";
+    iconEl.style.fontSize = "0px";
+    iconEl.innerHTML = `<img alt="" src="${escapeHtml(s.icon)}" style="width:38px;height:38px;object-fit:contain;filter:drop-shadow(0 6px 14px rgba(0,0,0,.45));" />`;
+  } else {
+    iconEl.style.fontSize = "";
+    iconEl.textContent = s.icon || "❓";
+  }
+  labelEl.textContent = s.name || "";
+}
+
+/* Vollbild = alle Felder gleich */
+function isFullScreen(grid){
+  const first = grid[0][0];
+  for (let row=0; row<def.rows; row++){
+    for (let r=0; r<def.reels; r++){
+      if (grid[row][r] !== first) return false;
+    }
+  }
+  return true;
+}
+
+/* =========================
+   UI
+========================= */
+function syncHUD() {
+  slotNameEl.textContent = def.name;
+  creditsEl.textContent = String(state.credits);
+  betPerLineEl.textContent = String(state.betPerLine);
+  lineCountEl.textContent = String(enabledLines().length);
+  autoBtn.textContent = `AUTO: ${state.auto ? "ON" : "OFF"}`;
+  soundToggle.textContent = audioOn ? "ON" : "OFF";
+}
+function renderSlotSelects(){
+  slotSelect.innerHTML = "";
+  bSlotSelect.innerHTML = "";
+  for (const s of slots) {
+    const o1 = document.createElement("option");
+    o1.value = s.id; o1.textContent = s.def.name;
+    if (s.id === currentSlotId) o1.selected = true;
+    slotSelect.appendChild(o1);
+
+    const o2 = document.createElement("option");
+    o2.value = s.id; o2.textContent = s.def.name;
+    if (s.id === currentSlotId) o2.selected = true;
+    bSlotSelect.appendChild(o2);
+  }
+}
+function applyAdminUI(){
+  tabBuilder.classList.toggle("hidden", !isAdmin);
+  simBtn.classList.toggle("hidden", !isAdmin);
+  adminPill.classList.toggle("hidden", !isAdmin);
+  if (!isAdmin && !viewBuilder.classList.contains("hidden")) showPlay();
+}
+
+/* Tabs */
+function showPlay() {
+  tabPlay.classList.add("active");
+  tabBuilder.classList.remove("active");
+  viewPlay.classList.remove("hidden");
+  viewBuilder.classList.add("hidden");
+}
+function showBuilder() {
+  if (!isAdmin) return;
+  tabBuilder.classList.add("active");
+  tabPlay.classList.remove("active");
+  viewBuilder.classList.remove("hidden");
+  viewPlay.classList.add("hidden");
+  renderBuilder();
+}
+tabPlay.onclick = showPlay;
+tabBuilder.onclick = showBuilder;
+
+/* =========================
+   Admin Modal (Ctrl+Alt+#)
+========================= */
+function openAdminModal(){
+  adminModal.classList.remove("hidden");
+  adminCode.value = "";
+  adminStatus.textContent = isAdmin ? "Status: Admin ist aktiv." : "Status: Admin ist NICHT aktiv.";
+  adminCode.focus();
+}
+function closeAdminModal(){ adminModal.classList.add("hidden"); }
+
+document.addEventListener("keydown", (e) => {
+  if (!(e.ctrlKey && e.altKey)) return;
+  const keyIsHash = (e.key === "#") || (e.code === "Digit3") || (e.key === "3");
+  if (keyIsHash) {
+    e.preventDefault();
+    openAdminModal();
+  }
+});
+
+adminUnlockBtn.onclick = async () => {
+  if (adminCode.value === ADMIN_CODE) {
+    isAdmin = true;
+    localStorage.setItem(LS_ADMIN, "true");
+    adminStatus.textContent = "✅ Admin freigeschaltet.";
+    applyAdminUI();
+    if (audioOn) { ensureAudio(); if (AC?.state === "suspended") await AC.resume(); }
+    beep(700, 120, "triangle", 0.08);
+  } else {
+    adminStatus.textContent = "❌ Falscher Code.";
+    beep(200, 160, "sawtooth", 0.06);
+  }
+};
+adminLogoutBtn.onclick = () => {
+  isAdmin = false;
+  localStorage.setItem(LS_ADMIN, "false");
+  adminStatus.textContent = "Logout: Admin deaktiviert.";
+  applyAdminUI();
+};
+adminCloseBtn.onclick = closeAdminModal;
+adminModal.addEventListener("click", (e) => { if (e.target === adminModal) closeAdminModal(); });
+
+/* =========================
+   Render reels (dynamic 3/5)
+========================= */
+function renderReels() {
+  reelsEl.innerHTML = "";
+  reelsEl.style.gridTemplateColumns = `repeat(${def.reels}, minmax(0,1fr))`;
+
+  cellMatrix = Array.from({length:def.rows}, ()=>Array(def.reels).fill(null));
+  for (let r = 0; r < def.reels; r++) {
+    const col = document.createElement("div");
+    col.className = "reel";
+    for (let row = 0; row < def.rows; row++) {
+      const cell = document.createElement("div");
+      cell.className = "cell";
+      cell.innerHTML = `<div class="icon">❓</div><div class="label"></div>`;
+      col.appendChild(cell);
+      cellMatrix[row][r] = cell;
+    }
+    reelsEl.appendChild(col);
+  }
+}
+
+function clearHighlights() {
+  for (let row=0; row<def.rows; row++) {
+    for (let r=0; r<def.reels; r++) {
+      cellMatrix[row][r].classList.remove("win","dim");
+    }
+  }
+}
+function dimAllExcept(coordsSet) {
+  for (let row=0; row<def.rows; row++) {
+    for (let r=0; r<def.reels; r++) {
+      const key = `${row},${r}`;
+      if (!coordsSet.has(key)) cellMatrix[row][r].classList.add("dim");
+    }
+  }
+}
+
+/* =========================
+   Spin animation
+========================= */
+function startSpinAnimation() {
+  clearHighlights();
+  winsEl.innerHTML = "";
+  setMsg("Spinning...");
+
+  spinBtn.disabled = true;
+  simBtn.disabled = true;
+  betDown.disabled = true;
+  betUp.disabled = true;
+
+  spinTick();
+
+  const intervals = [];
+  for (let r=0; r<def.reels; r++) {
+    const iv = setInterval(() => {
+      if (def.reelMode === "stacked") {
+        const sym = randomSymbolFromBag();
+        for (let row=0; row<def.rows; row++) renderCell(cellMatrix[row][r], sym);
+      } else {
+        for (let row=0; row<def.rows; row++) renderCell(cellMatrix[row][r], randomSymbolFromBag());
       }
+    }, 70);
+    intervals.push(iv);
+  }
+  return intervals;
+}
+function stopReel(intervals, reelIndex, finalColSyms) {
+  clearInterval(intervals[reelIndex]);
+  for (let row=0; row<def.rows; row++) renderCell(cellMatrix[row][reelIndex], finalColSyms[row]);
+  stopTick();
+}
+
+/* =========================
+   Outcome generation
+========================= */
+function generateOutcome() {
+  const grid = Array.from({length:def.rows}, ()=>Array(def.reels).fill(null));
+
+  if (def.reelMode === "stacked") {
+    for (let r=0; r<def.reels; r++) {
+      const sym = randomSymbolFromBag();
+      for (let row=0; row<def.rows; row++) grid[row][r] = sym;
     }
-
-    boardEl._cells = cells;
-  }
-
-  function setCell(boardEl, slot, r, c, key) {
-    const cell = boardEl._cells?.[r]?.[c];
-    if (!cell) return;
-
-    const def = symbolDef(slot, key);
-    const icon = cell.querySelector(".icon");
-
-    cell.classList.remove("win");
-    [...cell.classList].forEach(cl => {
-      if (cl.startsWith("sym-")) cell.classList.remove(cl);
-    });
-
-    cell.classList.add("sym-" + safeClassKey(key));
-    cell.dataset.key = key;
-    icon.textContent = def.label;
-  }
-
-  function clearWinHighlights(boardEl) {
-    boardEl.querySelectorAll(".symbol.win").forEach(el => el.classList.remove("win"));
-  }
-
-  function highlightPositions(boardEl, positions) {
-    for (const p of positions) {
-      const cell = boardEl._cells?.[p.r]?.[p.c];
-      if (cell) cell.classList.add("win");
-    }
-  }
-
-  /* =========================
-     Grid + Mystery/Wild
-  ========================= */
-  function generateGrid(slot, mode) {
-    const weights = mode === "power" ? slot.weights.power : slot.weights.base;
-    const grid = Array.from({ length: slot.rows }, () => Array.from({ length: slot.reels }, () => SYM.T10));
-
-    for (let c = 0; c < slot.reels; c++) {
-      for (let r = 0; r < slot.rows; r++) {
-        grid[r][c] = weightedChoice(weights);
-      }
-    }
-
     return grid;
   }
 
-  function applyMysteryAndWild(slot, grid, mode) {
-    const out = grid.map(row => row.slice());
-    const mystery = slot.features.mysterySymbol;
-    const wildMode = !!slot.features.wildMode;
+  for (let r=0; r<def.reels; r++) {
+    for (let row=0; row<def.rows; row++) grid[row][r] = randomSymbolFromBag();
+  }
+  return grid;
+}
 
-    for (let r = 0; r < slot.rows; r++) {
-      for (let c = 0; c < slot.reels; c++) {
-        if (out[r][c] === mystery) {
-          if (wildMode) out[r][c] = WILD;
+/* =========================
+   ✅ WIN EVALUATION (Runs überall!)
+   - Nicht nur links beginnend
+   - Erkannt wird jedes 3+ gleiche Segment, auch "in der Mitte"
+========================= */
+function evaluate(grid, betPerLine) {
+  const lines = enabledLines();
+  const wins = [];
+  let totalWin = 0;
 
-          if (mode === "power") {
-            const ch = Number(slot.features.wildExpandChancePower || 0);
-            if (ch > 0 && rand01() < ch) {
-              for (let rr = 0; rr < slot.rows; rr++) out[rr][c] = WILD;
-            }
-          }
-        }
-      }
+  for (const line of lines) {
+    const pattern = normalizePattern(line.pattern, def.reels);
+    const lineSyms = [];
+    for (let r=0; r<def.reels; r++) {
+      lineSyms.push(grid[pattern[r]][r]);
     }
 
-    return out;
-  }
+    // Runs suchen (z.B. [A, A, A] oder [B, B, B] in der Mitte etc.)
+    let i = 0;
+    while (i < def.reels) {
+      let j = i + 1;
+      while (j < def.reels && lineSyms[j] === lineSyms[i]) j++;
 
-  /* =========================
-     Win evaluation
-  ========================= */
-  function evaluateWins(slot, evalGrid, betTotal) {
-    let totalWin = 0;
-    const lineWins = [];
+      const len = j - i;
+      if (len >= 3) {
+        const symId = lineSyms[i];
+        const symObj = getSymbolById(symId);
+        const mult = symObj.pay[len] || symObj.pay[3] || 0;
+        const amount = mult * betPerLine;
 
-    for (let li = 0; li < PAYLINES.length; li++) {
-      const pattern = PAYLINES[li];
-      const seq = [];
-      const pos = [];
-
-      for (let c = 0; c < slot.reels; c++) {
-        const r = pattern[c];
-        seq.push(evalGrid[r][c]);
-        pos.push({ r, c });
-      }
-
-      let base = null;
-      let length = 0;
-      const positions = [];
-
-      for (let c = 0; c < seq.length; c++) {
-        const s = seq[c];
-
-        if (base === null) {
-          if (s === WILD) {
-            length++;
-            positions.push(pos[c]);
-          } else {
-            base = s;
-            length++;
-            positions.push(pos[c]);
-          }
-        } else {
-          if (s === base || s === WILD) {
-            length++;
-            positions.push(pos[c]);
-          } else {
-            break;
-          }
-        }
-      }
-
-      if (base === null) base = SYM.DIA;
-
-      if (length >= 3) {
-        const pt = slot.paytable[base];
-        const mult = pt?.[length];
-        if (mult) {
-          const amount = Math.round((mult * betTotal) * 100) / 100;
+        if (amount > 0) {
           totalWin += amount;
-          lineWins.push({
-            lineIndex: li,
+          const coords = [];
+          for (let r=i; r<j; r++) coords.push({ row: pattern[r], r });
+
+          wins.push({
+            lineId: line.id,
+            lineName: line.name,
+            symbolId: symId,
+            symbolName: symObj.name,
+            icon: symObj.icon,
+            len,
+            mult,
             amount,
-            symbol: base,
-            length,
-            positions: positions.slice(0, length)
+            coords
           });
         }
       }
+      i = j;
     }
-
-    totalWin = Math.round(totalWin * 100) / 100;
-    return { totalWin, lineWins };
   }
 
-  /* =========================
-     Reel Animation
-  ========================= */
-  async function spinBoardAnimated(boardEl, slot, mode, finalGrid) {
-    boardEl.classList.add("reelSpinning");
-    const weights = mode === "power" ? slot.weights.power : slot.weights.base;
+  return { wins, totalWin };
+}
 
-    const intervals = [];
-    for (let c = 0; c < slot.reels; c++) {
-      const iv = setInterval(() => {
-        audio.reelTick();
-        for (let r = 0; r < slot.rows; r++) {
-          const k = weightedChoice(weights);
-          setCell(boardEl, slot, r, c, k);
-        }
-      }, 65);
-      intervals.push(iv);
-    }
-
-    for (let c = 0; c < slot.reels; c++) {
-      const stopDelay = 520 + c * 240;
-      await wait(stopDelay);
-
-      clearInterval(intervals[c]);
-      for (let r = 0; r < slot.rows; r++) {
-        setCell(boardEl, slot, r, c, finalGrid[r][c]);
-      }
-      audio.reelStop();
-    }
-
-    boardEl.classList.remove("reelSpinning");
+function renderWins(wins) {
+  // nur die letzten 3 anzeigen (damit nix scrollt)
+  const last = wins.slice(-3);
+  winsEl.innerHTML = "";
+  for (const w of last) {
+    const row = document.createElement("div");
+    row.className = "winRow";
+    const left = document.createElement("div");
+    const icon = looksLikeUrl(w.icon) ? "🟦" : w.icon;
+    left.textContent = `${icon} ${w.symbolName} ×${w.len} (${w.lineName})`;
+    const right = document.createElement("div");
+    right.innerHTML = `<b>+${w.amount}</b> <span style="color:var(--muted);font-size:12px;">(x${w.mult})</span>`;
+    row.appendChild(left);
+    row.appendChild(right);
+    winsEl.appendChild(row);
   }
+}
 
-  function wait(ms) {
-    return new Promise(res => setTimeout(res, ms));
+function highlightWins(wins) {
+  clearHighlights();
+  if (!wins.length) return;
+  const set = new Set();
+  for (const w of wins) for (const c of w.coords) set.add(`${c.row},${c.r}`);
+  for (const key of set) {
+    const [row, r] = key.split(",").map(Number);
+    cellMatrix[row][r].classList.add("win");
   }
+  dimAllExcept(set);
+}
 
-  /* =========================
-     Game Flow + Auto
-  ========================= */
-  let isSpinning = false;
-  let pendingPower = null;
-  let autoSpin = false;
+/* =========================
+   POWERSPINS (Popup)
+========================= */
+function psOpen(spinsCount, betLock, retryNeed, retryCount){
+  // stop auto
+  state.auto = false;
+  if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+  saveCurrentState();
+  syncHUD();
 
-  function setControlsEnabled(on) {
-    spinBtn.disabled = !on;
-    autoBtn.disabled = !on;
-    wheelBtn.disabled = !on;
-    slotSelect.disabled = !on;
-    betSelect.disabled = !on;
-  }
+  ps.active = true;
+  ps.spinsLeft = spinsCount;
+  ps.sessionWin = 0;
+  ps.betLock = betLock;
+  ps.retryNeed = retryNeed;
+  ps.retryCount = retryCount;
+  ps.allowRetry = false;
 
-  function stopAutoSpin(reason) {
-    if (!autoSpin) return;
-    autoSpin = false;
-    autoBtn.textContent = "AUTO: AUS";
-    autoBtn.classList.remove("primary");
-    if (reason) setEvent(`<b>Auto-Spin gestoppt:</b> ${reason}`);
-  }
+  psLeftEl.textContent = String(ps.spinsLeft);
+  psWinEl.textContent = "0";
+  psBetLockEl.textContent = String(ps.betLock);
+  psNeedEl.textContent = String(ps.retryNeed);
+  psMsg.textContent = "PowerSpins gestartet.";
+  psRetryBtn.classList.add("hidden");
 
-  async function spinBase() {
-    audio.ensure();
+  psModal.classList.remove("hidden");
+}
 
-    if (isSpinning) return;
-    const slot = getSelectedSlot();
-    const bet = Number(state.bet);
+function psClose(){
+  ps.active = false;
+  psModal.classList.add("hidden");
+}
 
-    if (state.balance < bet) {
-      setStatus("Nicht genug Balance.");
-      setEvent(`<b>Kein Spin:</b> Balance zu niedrig (${eur(state.balance)}).`);
-      stopAutoSpin("Balance zu niedrig");
-      audio.lose();
+async function psSpin(){
+  if (!ps.active || spinning || ttc.active) return;
+  if (ps.spinsLeft <= 0) return;
+
+  psSpinBtn.disabled = true;
+  psSound();
+
+  // Freispiele: keine Kosten, aber gleiche Auszahlung mit betLock
+  const res = await spinCore({ free: true, betOverride: ps.betLock, suppressFeatureTriggers: true });
+
+  ps.spinsLeft--;
+  ps.sessionWin += res.totalWin;
+
+  psLeftEl.textContent = String(ps.spinsLeft);
+  psWinEl.textContent = String(ps.sessionWin);
+
+  if (ps.spinsLeft <= 0) {
+    // Ende -> Regel: wenn 0 gewonnen => weg, wenn genug gewonnen => nochmal Chance
+    if (ps.sessionWin <= 0) {
+      psMsg.textContent = "PowerSpins vorbei: 0 Gewinn → weg.";
+      await wait(700);
+      psClose();
+      setMsg("PowerSpins vorbei (0 Gewinn).");
+    } else if (ps.sessionWin >= ps.retryNeed) {
+      ps.allowRetry = true;
+      psMsg.textContent = `PowerSpins vorbei: +${ps.sessionWin} → NOCHMAL CHANCE verfügbar!`;
+      psRetryBtn.classList.remove("hidden");
+      psSpinBtn.disabled = true;
       return;
-    }
-
-    isSpinning = true;
-    setControlsEnabled(false);
-
-    state.balance = Math.round((state.balance - bet) * 100) / 100;
-    saveState();
-    renderBalance();
-
-    setStatus("Dreht...");
-    setEvent(`Einsatz: <b>${eur(bet)}</b> · Slot: <b>${slot.name}</b>`);
-    lastWinEl.textContent = eur(0);
-
-    clearWinHighlights(baseBoardEl);
-
-    const rawGrid = generateGrid(slot, "base");
-    await spinBoardAnimated(baseBoardEl, slot, "base", rawGrid);
-
-    const evalGrid = applyMysteryAndWild(slot, rawGrid, "base");
-    const res = evaluateWins(slot, evalGrid, bet);
-
-    clearWinHighlights(baseBoardEl);
-    for (const lw of res.lineWins) highlightPositions(baseBoardEl, lw.positions);
-
-    const win = res.totalWin;
-    lastWinEl.textContent = eur(win);
-
-    if (win > 0) {
-      setStatus(`Gewinn: ${eur(win)} · Linien: ${res.lineWins.length}`);
-      setEvent(`<b>WIN</b> ✅ +${eur(win)} · Einsatz ${eur(bet)} · Linien ${res.lineWins.length}`);
-      audio.win();
-
-      const trigger = slot.features.powerSpins && win >= slot.features.powerTriggerMultiplier * bet;
-      if (trigger) {
-        pendingPower = { baseWin: win, bet, slotId: slot.id };
-        openPowerModal(pendingPower);
-        stopAutoSpin("Power-Spins verfügbar");
-      } else {
-        state.balance = Math.round((state.balance + win) * 100) / 100;
-        saveState();
-        renderBalance();
-      }
     } else {
-      setStatus("Kein Gewinn.");
-      setEvent(`<b>LOSE</b> ❌ Einsatz ${eur(bet)}`);
-      audio.lose();
-    }
-
-    isSpinning = false;
-    setControlsEnabled(true);
-
-    if (
-      autoSpin &&
-      !pendingPower &&
-      powerModalOverlay.classList.contains("hidden") &&
-      wheelModalOverlay.classList.contains("hidden")
-    ) {
+      psMsg.textContent = `PowerSpins vorbei: +${ps.sessionWin} (zu wenig für nochmal Chance).`;
       await wait(900);
-      if (autoSpin) spinBase();
+      psClose();
+      setMsg(`PowerSpins Ende: +${ps.sessionWin}`);
+    }
+  } else {
+    psMsg.textContent = res.totalWin > 0 ? `+${res.totalWin} gewonnen` : "kein Gewinn";
+  }
+
+  psSpinBtn.disabled = false;
+}
+
+function psRetry(){
+  if (!ps.active || !ps.allowRetry) return;
+  ps.allowRetry = false;
+
+  // neue Session (Retry)
+  ps.spinsLeft = ps.retryCount;
+  ps.sessionWin = 0;
+
+  psLeftEl.textContent = String(ps.spinsLeft);
+  psWinEl.textContent = "0";
+  psMsg.textContent = "NOCHMAL CHANCE gestartet!";
+  psRetryBtn.classList.add("hidden");
+  psSpinBtn.disabled = false;
+}
+
+psSpinBtn.onclick = psSpin;
+psRetryBtn.onclick = psRetry;
+psEndBtn.onclick = () => {
+  // wenn user manuell beendet: nur collect über credits passiert schon bei wins
+  psClose();
+  setMsg("PowerSpins beendet.");
+};
+psModal.addEventListener("click", (e) => { if (e.target === psModal) { psClose(); setMsg("PowerSpins beendet."); } });
+
+/* =========================
+   TRIPLE CHANCE (wie vorher)
+========================= */
+function ttcOpen(basePayout){
+  state.auto = false;
+  if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+  saveCurrentState();
+  syncHUD();
+
+  ttc.active = true;
+  ttc.basePayout = Math.max(0, basePayout|0);
+  ttc.pending = 0;
+  ttc.greens = 0;
+  ttc.round = 0;
+
+  ttc.maxRounds = clampInt(def.features?.ttMaxRounds ?? 0, 0, 99);
+  ttc.greensPerRound = clampInt(def.features?.ttGreens ?? 3, 1, 20);
+  ttc.redsPerRound = clampInt(def.features?.ttReds ?? 1, 1, 20);
+
+  ttcBaseEl.textContent = String(ttc.basePayout);
+  ttcPendingEl.textContent = "0";
+  ttcGreensEl.textContent = "0";
+  ttcRoundEl.textContent = "0";
+  ttcMsg.textContent = "Start: SPIN-OFF drücken";
+
+  renderTtcBoard(null);
+  renderTtcLamps("reset");
+
+  ttcModal.classList.remove("hidden");
+}
+
+function ttcClose(){
+  ttc.active = false;
+  ttcModal.classList.add("hidden");
+}
+
+function renderTtcBoard(pickIndex){
+  const tiles = [];
+  for (let i=0;i<ttc.greensPerRound;i++) tiles.push("green");
+  for (let i=0;i<ttc.redsPerRound;i++) tiles.push("red");
+
+  for (let i = tiles.length - 1; i > 0; i--) {
+    const j = randInt(i + 1);
+    [tiles[i], tiles[j]] = [tiles[j], tiles[i]];
+  }
+
+  ttcBoard.innerHTML = "";
+  tiles.forEach((type, idx) => {
+    const d = document.createElement("div");
+    d.className = `ttcTile ${type}` + (pickIndex === idx ? " pick" : "");
+    d.textContent = type === "green" ? "GRÜN" : "ROT";
+    ttcBoard.appendChild(d);
+  });
+
+  return tiles;
+}
+
+function renderTtcLamps(mode){
+  if (mode === "reset") {
+    ttcLamps.innerHTML = "";
+    for (let i=0;i<12;i++){
+      const l = document.createElement("div");
+      l.className = "lamp";
+      ttcLamps.appendChild(l);
+    }
+    return;
+  }
+  const lamps = Array.from(ttcLamps.querySelectorAll(".lamp"));
+  if (mode === "green") {
+    if (ttc.greens - 1 < lamps.length) lamps[ttc.greens - 1].classList.add("green");
+  }
+  if (mode === "red") {
+    for (const l of lamps) {
+      l.classList.remove("green");
+      l.classList.add("red");
     }
   }
+}
 
-  /* =========================
-     Power Spins
-  ========================= */
-  function openPowerModal(info) {
-    const slot = getAllSlots()[info.slotId] || getSelectedSlot();
-    const costPerSpin = info.bet * 4;
-    const maxSpins = Math.max(1, Math.floor(info.baseWin / costPerSpin));
+async function ttcSpin(){
+  if (!ttc.active) return;
 
-    powerBuyRange.min = "1";
-    powerBuyRange.max = String(maxSpins);
-    powerBuyRange.value = String(Math.min(2, maxSpins));
-
-    powerModalText.innerHTML =
-      `Du hast <b>${eur(info.baseWin)}</b> gewonnen (≥ ${slot.features.powerTriggerMultiplier}× Einsatz).<br/>
-       Power-Spins laufen auf <b>4 Feldern</b> gleichzeitig.<br/>
-       Deshalb kostet 1 Power-Spin: <b>${eur(costPerSpin)}</b> (Einsatz × 4).`;
-
-    syncPowerBuyText(info.bet);
-    powerModalOverlay.classList.remove("hidden");
+  if (ttc.maxRounds > 0 && ttc.round >= ttc.maxRounds) {
+    ttcMsg.textContent = "Max Runden erreicht → Auto-COLLECT.";
+    ttcCollect();
+    return;
   }
 
-  function closePowerModalNow() {
-    powerModalOverlay.classList.add("hidden");
+  ttc.round++;
+  ttcRoundEl.textContent = String(ttc.round);
+
+  const totalTiles = ttc.greensPerRound + ttc.redsPerRound;
+  const pick = randInt(totalTiles);
+
+  const mapping = renderTtcBoard(pick);
+  await wait(80);
+
+  const result = mapping[pick];
+  if (result === "green") {
+    ttc.greens++;
+    ttc.pending += ttc.basePayout;
+    ttcPendingEl.textContent = String(ttc.pending);
+    ttcGreensEl.textContent = String(ttc.greens);
+    renderTtcLamps("green");
+    ttcMsg.textContent = `✅ GRÜN! +${ttc.basePayout} Bonus`;
+    greenSound();
+  } else {
+    ttc.pending = 0;
+    ttc.greens = 0;
+    ttcPendingEl.textContent = "0";
+    ttcGreensEl.textContent = "0";
+    renderTtcLamps("red");
+    ttcMsg.textContent = "🟥 ROT! Feature beendet. Bonus weg.";
+    redSound();
+    await wait(900);
+    ttcClose();
+  }
+}
+
+function ttcCollect(){
+  if (!ttc.active) return;
+  if (ttc.pending > 0) {
+    state.credits += ttc.pending;
+    saveCurrentState();
+    syncHUD();
+    setMsg(`COLLECT: +${ttc.pending} (Triple Chance)`);
+  } else {
+    setMsg("Triple Chance: nichts zu collecten.");
+  }
+  ttcClose();
+}
+ttcSpinBtn.onclick = ttcSpin;
+ttcCollectBtn.onclick = ttcCollect;
+ttcModal.addEventListener("click", (e) => { if (e.target === ttcModal) ttcCollect(); });
+
+/* =========================
+   Core Spin (shared)
+========================= */
+async function spinCore({ free=false, betOverride=null, suppressFeatureTriggers=false } = {}) {
+  if (audioOn) ensureAudio();
+
+  const lines = enabledLines();
+  const bet = Math.max(1, (betOverride ?? state.betPerLine)|0);
+  const totalBet = bet * lines.length;
+
+  const intervals = startSpinAnimation();
+  const finalGrid = generateOutcome();
+
+  for (let r=0; r<def.reels; r++) {
+    await wait(330 + r*180);
+    const colSyms = [];
+    for (let row=0; row<def.rows; row++) colSyms.push(finalGrid[row][r]);
+    stopReel(intervals, r, colSyms);
   }
 
-  function syncPowerBuyText(bet) {
-    const spins = Number(powerBuyRange.value);
-    const cost = spins * bet * 4;
-    powerBuySpins.textContent = spins === 1 ? "1 Spin" : `${spins} Spins`;
-    powerBuyCost.textContent = `${eur(cost)} (aus Gewinn)`;
+  const res = evaluate(finalGrid, bet);
+
+  // payout
+  if (res.totalWin > 0) {
+    state.credits += res.totalWin;
+    saveCurrentState();
+    syncHUD();
+    winJingle();
   }
 
-  async function startPowerSpins({ baseWin, bet, slotId }, spinsToBuy) {
-    const slot = getAllSlots()[slotId] || getSelectedSlot();
+  renderWins(res.wins);
+  highlightWins(res.wins);
 
-    const cost = Math.round(spinsToBuy * bet * 4 * 100) / 100;
-    const immediate = Math.round((baseWin - cost) * 100) / 100;
+  return { ...res, finalGrid, totalBet, bet, linesCount: lines.length };
+}
 
-    state.balance = Math.round((state.balance + immediate) * 100) / 100;
-    saveState();
-    renderBalance();
+/* =========================
+   Main Play Spin
+========================= */
+async function spinOnce() {
+  if (spinning || ttc.active || ps.active) return;
 
-    powerPanel.classList.remove("hidden");
-    powerWinEl.textContent = eur(0);
-    powerMeta.textContent = `${spinsToBuy} Spin(s) · Kosten/Spin ${eur(bet * 4)} · 4 Felder`;
-    powerStatus.textContent = "Power-Spins laufen...";
+  const lines = enabledLines();
+  if (lines.length === 0) { setMsg("Aktiviere mindestens 1 Linie im Builder (Admin)."); return; }
 
-    isSpinning = true;
-    setControlsEnabled(false);
+  const totalBet = state.betPerLine * lines.length;
+  if (state.credits < totalBet) { setMsg(`Zu wenig Credits. Du brauchst ${totalBet}.`); return; }
 
-    let powerTotal = 0;
-    let spinsLeft = spinsToBuy;
+  spinning = true;
+  // Kosten abziehen (normaler Spin)
+  state.credits -= totalBet;
+  saveCurrentState();
+  syncHUD();
 
-    for (const pb of pBoards) {
-      if (!pb._cells) buildBoard(pb, slot);
-      clearWinHighlights(pb);
+  const res = await spinCore({ free:false });
+
+  if (res.totalWin > 0) setMsg(`WIN: +${res.totalWin} Credits`);
+  else setMsg("Kein Gewinn. Versuch’s nochmal.");
+
+  // ✅ Feature Trigger (nur wenn nicht unterdrückt)
+  if (!ps.active && !ttc.active) {
+    // 1) Triple Chance (Vollbild)
+    if (def.features?.ttChanceEnabled && isFullScreen(res.finalGrid) && res.totalWin > 0) {
+      await wait(450);
+      ttcOpen(res.totalWin);
     }
 
-    while (spinsLeft > 0) {
-      let spinWin = 0;
-
-      for (let i = 0; i < 4; i++) {
-        clearWinHighlights(pBoards[i]);
-        const raw = generateGrid(slot, "power");
-        await spinBoardAnimated(pBoards[i], slot, "power", raw);
-        const evalGrid = applyMysteryAndWild(slot, raw, "power");
-        const res = evaluateWins(slot, evalGrid, bet);
-        for (const lw of res.lineWins) highlightPositions(pBoards[i], lw.positions);
-        spinWin += res.totalWin;
-      }
-
-      spinWin = Math.round(spinWin * 100) / 100;
-      powerTotal = Math.round((powerTotal + spinWin) * 100) / 100;
-      powerWinEl.textContent = eur(powerTotal);
-
-      powerStatus.textContent = `Spin gewonnen: ${eur(spinWin)} · Übrig: ${spinsLeft - 1}`;
-
-      spinsLeft -= 1;
-      await wait(350);
-    }
-
-    state.balance = Math.round((state.balance + powerTotal) * 100) / 100;
-    saveState();
-    renderBalance();
-
-    powerStatus.textContent = `Fertig. Power-Gewinn: ${eur(powerTotal)} gutgeschrieben.`;
-    setEvent(`<b>Power Ende</b> ✅ +${eur(powerTotal)}`);
-
-    isSpinning = false;
-    setControlsEnabled(true);
-  }
-
-  /* =========================
-     Daily Wheel
-  ========================= */
-  const WHEEL_VALUES = [10,20,30,40,50,60,70,80,90,100];
-
-  function wheelReady() {
-    return Date.now() >= (state.lastWheelAt || 0) + DAY_MS;
-  }
-
-  function openWheelModal() {
-    updateWheelModalText();
-    wheelModalOverlay.classList.remove("hidden");
-    stopAutoSpin("Wheel geöffnet");
-  }
-
-  function closeWheelModalNow() {
-    wheelModalOverlay.classList.add("hidden");
-  }
-
-  function updateWheelModalText() {
-    const now = Date.now();
-    const next = (state.lastWheelAt || 0) + DAY_MS;
-
-    if (now >= next) {
-      wheelReadyText.textContent = "Bereit zum Drehen ✅";
-      spinWheelBtn.disabled = false;
-    } else {
-      const ms = next - now;
-      const h = Math.floor(ms / (60 * 60 * 1000));
-      const m = Math.floor((ms % (60 * 60 * 1000)) / (60 * 1000));
-      const s = Math.floor((ms % (60 * 1000)) / 1000);
-      wheelReadyText.textContent = `Noch nicht bereit. Wieder in ${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-      spinWheelBtn.disabled = true;
-    }
-  }
-
-  let wheelSpinning = false;
-
-  async function spinDailyWheel() {
-    audio.ensure();
-
-    if (wheelSpinning) return;
-    if (!wheelReady()) {
-      updateWheelModalText();
-      return;
-    }
-
-    wheelSpinning = true;
-    spinWheelBtn.disabled = true;
-
-    const index = randInt(0, WHEEL_VALUES.length - 1);
-    const prize = WHEEL_VALUES[index];
-
-    const segmentDeg = 360 / WHEEL_VALUES.length;
-    const targetDeg = (360 - (index * segmentDeg) - (segmentDeg / 2));
-    const extraTurns = 5 * 360;
-    const finalDeg = extraTurns + targetDeg + randInt(-6, 6);
-
-    wheel.style.transform = `rotate(${finalDeg}deg)`;
-    wheelInfo.textContent = "Dreht...";
-
-    await wait(2700);
-
-    state.balance = Math.round((state.balance + prize) * 100) / 100;
-    state.lastWheelAt = Date.now();
-    saveState();
-
-    renderBalance();
-    updateWheelCooldownUI();
-    updateWheelModalText();
-
-    wheelInfo.innerHTML = `Gewonnen: <b>${eur(prize)}</b> ✅`;
-    setEvent(`<b>Daily Wheel</b> ✅ +${eur(prize)}`);
-    audio.win();
-
-    wheelSpinning = false;
-    spinWheelBtn.disabled = false;
-  }
-
-  /* =========================
-     Admin / Builder
-  ========================= */
-  function tryOpenAdmin() {
-    const pwd = prompt("Admin Passwort:");
-    if (pwd !== ADMIN_PASSWORD) {
-      alert("Falsch.");
-      return;
-    }
-
-    adminBalanceInput.value = String(state.balance.toFixed(2));
-    refreshBuilderJson();
-    adminOverlay.classList.remove("hidden");
-    stopAutoSpin("Admin geöffnet");
-  }
-
-  function closeAdminNow() {
-    adminOverlay.classList.add("hidden");
-  }
-
-  async function copyToClipboard(text) {
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      ta.remove();
-    }
-  }
-
-  function exportAllData() {
-    copyToClipboard(JSON.stringify(state, null, 2));
-    alert("Save JSON wurde in die Zwischenablage kopiert.");
-  }
-
-  function resetAll() {
-    if (!confirm("Wirklich ALLES zurücksetzen?")) return;
-    state = { ...defaultState };
-    saveState();
-    initUI();
-    alert("Zurückgesetzt.");
-  }
-
-  function validateSlotConfig(cfg) {
-    const errors = [];
-    const req = (cond, msg) => { if (!cond) errors.push(msg); };
-
-    req(cfg && typeof cfg === "object", "Config muss ein Objekt sein.");
-    if (!cfg || typeof cfg !== "object") return { ok: false, errors };
-
-    req(typeof cfg.id === "string" && cfg.id.length >= 3, "id fehlt/zu kurz.");
-    req(typeof cfg.name === "string" && cfg.name.length >= 2, "name fehlt/zu kurz.");
-    req(cfg.reels === 5, "reels muss 5 sein.");
-    req(cfg.rows === 3, "rows muss 3 sein.");
-    req(cfg.paylines === 10, "paylines muss 10 sein.");
-
-    req(cfg.features && typeof cfg.features === "object", "features fehlt.");
-    req(Array.isArray(cfg.symbols) && cfg.symbols.length >= 6, "symbols muss Array sein.");
-    req(cfg.weights && cfg.weights.base && cfg.weights.power, "weights.base/power fehlen.");
-    req(cfg.paytable && typeof cfg.paytable === "object", "paytable fehlt.");
-
-    if (cfg.symbols && Array.isArray(cfg.symbols)) {
-      const keys = cfg.symbols.map(s => s.key);
-      req(new Set(keys).size === keys.length, "symbols keys müssen eindeutig sein.");
-    }
-
-    return { ok: errors.length === 0, errors };
-  }
-
-  function refreshBuilderJson() {
-    const all = getAllSlots();
-    const id = builderSlotSelect.value || state.selectedSlotId;
-    const cfg = all[id] || getSelectedSlot();
-    builderJson.value = JSON.stringify(cfg, null, 2);
-    builderSlotSelect.value = id;
-  }
-
-  function saveBuilderJson() {
-    let obj;
-    try {
-      obj = JSON.parse(builderJson.value);
-    } catch (e) {
-      alert("JSON Fehler: " + e.message);
-      return;
-    }
-
-    const validated = validateSlotConfig(obj);
-    if (!validated.ok) {
-      alert("Config ungültig:\n- " + validated.errors.join("\n- "));
-      return;
-    }
-
-    const isBuiltIn = (obj.id === "lucky_pharaoh");
-    const id = isBuiltIn ? (obj.id + "_custom_" + randInt(1000, 9999)) : obj.id;
-    obj.id = id;
-
-    state.customSlots[id] = obj;
-    state.selectedSlotId = id;
-
-    saveState();
-    fillSlotOptions();
-    slotSelect.value = state.selectedSlotId;
-    builderSlotSelect.value = state.selectedSlotId;
-
-    renderTopMeta();
-    rebuildBoardsForSlot();
-
-    alert("Gespeichert als Custom Slot: " + obj.name + " (" + obj.id + ")");
-  }
-
-  function slugify(s) {
-    return String(s || "")
-      .toLowerCase()
-      .trim()
-      .replace(/[^\wäöüß]+/g, "_")
-      .replace(/_+/g, "_")
-      .replace(/^_|_$/g, "");
-  }
-
-  function builderNewSlot() {
-    const name = prompt("Name für neuen Slot:");
-    if (!name) return;
-
-    const id = slugify(name) || ("slot_" + randInt(1000, 9999));
-    const base = makeLuckyPharaohSlot();
-    const newCfg = structuredClone(base);
-
-    newCfg.id = id;
-    newCfg.name = name;
-
-    state.customSlots[id] = newCfg;
-    state.selectedSlotId = id;
-    saveState();
-
-    fillSlotOptions();
-    slotSelect.value = id;
-    builderSlotSelect.value = id;
-    refreshBuilderJson();
-
-    renderTopMeta();
-    rebuildBoardsForSlot();
-
-    alert("Neuer Slot erstellt (Custom): " + name);
-  }
-
-  function builderCloneSelected() {
-    const all = getAllSlots();
-    const srcId = builderSlotSelect.value || state.selectedSlotId;
-    const src = all[srcId];
-    if (!src) return;
-
-    const clone = structuredClone(src);
-    clone.id = `${src.id}_clone_${randInt(1000, 9999)}`;
-    clone.name = `${src.name} (Clone)`;
-
-    state.customSlots[clone.id] = clone;
-    state.selectedSlotId = clone.id;
-    saveState();
-
-    fillSlotOptions();
-    slotSelect.value = clone.id;
-    builderSlotSelect.value = clone.id;
-    refreshBuilderJson();
-
-    renderTopMeta();
-    rebuildBoardsForSlot();
-
-    alert("Geklont: " + clone.name);
-  }
-
-  function builderDeleteSelected() {
-    const id = builderSlotSelect.value || state.selectedSlotId;
-
-    if (!state.customSlots[id]) {
-      alert("Nur Custom Slots können gelöscht werden.");
-      return;
-    }
-
-    if (!confirm("Custom Slot löschen? " + id)) return;
-
-    delete state.customSlots[id];
-    state.selectedSlotId = "lucky_pharaoh";
-    saveState();
-
-    fillSlotOptions();
-    slotSelect.value = state.selectedSlotId;
-    builderSlotSelect.value = state.selectedSlotId;
-    refreshBuilderJson();
-
-    renderTopMeta();
-    rebuildBoardsForSlot();
-
-    alert("Gelöscht.");
-  }
-
-  function builderExportSlot() {
-    const all = getAllSlots();
-    const id = builderSlotSelect.value || state.selectedSlotId;
-    const cfg = all[id];
-    if (!cfg) return;
-
-    copyToClipboard(JSON.stringify(cfg, null, 2));
-    alert("Slot JSON wurde kopiert.");
-  }
-
-  function builderImportSlot() {
-    const str = prompt("Slot JSON hier einfügen:");
-    if (!str) return;
-
-    let obj;
-    try {
-      obj = JSON.parse(str);
-    } catch (e) {
-      alert("JSON Fehler: " + e.message);
-      return;
-    }
-
-    const validated = validateSlotConfig(obj);
-    if (!validated.ok) {
-      alert("Ungültig:\n- " + validated.errors.join("\n- "));
-      return;
-    }
-
-    const id = obj.id && obj.id !== "lucky_pharaoh" ? obj.id : ("import_" + randInt(1000, 9999));
-    obj.id = id;
-
-    state.customSlots[id] = obj;
-    state.selectedSlotId = id;
-    saveState();
-
-    fillSlotOptions();
-    slotSelect.value = id;
-    builderSlotSelect.value = id;
-    refreshBuilderJson();
-
-    renderTopMeta();
-    rebuildBoardsForSlot();
-
-    alert("Importiert: " + obj.name + " (" + obj.id + ")");
-  }
-
-  /* =========================
-     Init / Rebuild
-  ========================= */
-  function rebuildBoardsForSlot() {
-    const slot = getSelectedSlot();
-    buildBoard(baseBoardEl, slot);
-
-    const g = generateGrid(slot, "base");
-    for (let r = 0; r < slot.rows; r++) {
-      for (let c = 0; c < slot.reels; c++) {
-        setCell(baseBoardEl, slot, r, c, g[r][c]);
+    // 2) PowerSpins (Popup) – auf normalen Slots
+    // Trigger: großer Gewinn ODER Vollbild
+    if (def.features?.powerSpinsEnabled) {
+      const triggerBigWin = res.totalWin >= (res.totalBet * 12); // "genug gewonnen" Feeling
+      const triggerFull = isFullScreen(res.finalGrid) && res.totalWin > 0;
+
+      if (triggerBigWin || triggerFull) {
+        const psCount = clampInt(def.features.powerSpinsCount ?? 10, 1, 99);
+        const retryX = clampInt(def.features.powerRetryX ?? 10, 1, 200);
+        const retryCount = clampInt(def.features.powerRetryCount ?? 5, 1, 99);
+        const retryNeed = res.totalBet * retryX;
+
+        await wait(350);
+        psOpen(psCount, state.betPerLine, retryNeed, retryCount);
       }
     }
   }
 
-  /* =========================
-     Events
-  ========================= */
-  spinBtn.addEventListener("click", spinBase);
+  spinBtn.disabled = false;
+  simBtn.disabled = false;
+  betDown.disabled = false;
+  betUp.disabled = false;
+  spinning = false;
 
-  autoBtn.addEventListener("click", () => {
-    audio.ensure();
-    autoSpin = !autoSpin;
-    autoBtn.textContent = autoSpin ? "AUTO: AN" : "AUTO: AUS";
-    autoBtn.classList.toggle("primary", autoSpin);
+  if (state.auto && !ps.active && !ttc.active) autoTimer = setTimeout(spinOnce, 320);
+}
 
-    if (autoSpin) {
-      setEvent("<b>Auto-Spin</b> ✅ gestartet");
-      if (!isSpinning) spinBase();
+/* =========================
+   RTP Sim (Admin)
+========================= */
+function simulate(spins = 10000) {
+  const lines = enabledLines();
+  if (lines.length === 0) { setMsg("RTP Test: keine Linien aktiv."); return; }
+  const bet = Math.max(1, state.betPerLine|0);
+  const totalBet = bet * lines.length;
+
+  let wagered = 0, won = 0;
+  for (let i=0;i<spins;i++) {
+    const g = generateOutcome();
+    const res = evaluate(g, bet);
+    wagered += totalBet;
+    won += res.totalWin;
+  }
+  const rtp = wagered > 0 ? (won / wagered) * 100 : 0;
+  setMsg(`RTP Test (${spins} Spins): ca. ${rtp.toFixed(2)}% (Gewonnen ${won} / Einsatz ${wagered})`);
+}
+
+/* =========================
+   Builder
+========================= */
+function tdInput(val, onChange) {
+  const td = document.createElement("td");
+  const inp = document.createElement("input");
+  inp.value = String(val ?? "");
+  inp.oninput = () => onChange(inp.value);
+  td.appendChild(inp);
+  return td;
+}
+function tdInputNum(val, min, max, onChange) {
+  const td = document.createElement("td");
+  const inp = document.createElement("input");
+  inp.type = "number";
+  inp.min = String(min);
+  inp.max = String(max);
+  inp.step = "1";
+  inp.value = String(val ?? 0);
+  inp.oninput = () => {
+    const v = Math.max(min, Math.min(max, Number(inp.value)|0));
+    onChange(v);
+  };
+  td.appendChild(inp);
+  return td;
+}
+
+function renderBuilder() {
+  if (!isAdmin) return;
+
+  bName.value = def.name;
+  bStartCredits.value = String(def.startCredits);
+  bAccent.value = def.accent;
+  bReels.value = String(def.reels);
+  bReelMode.value = def.reelMode === "stacked" ? "stacked" : "independent";
+
+  bPSEnabled.checked = !!def.features?.powerSpinsEnabled;
+  bPSCount.value = String(def.features?.powerSpinsCount ?? 10);
+  bPSRetrigX.value = String(def.features?.powerRetryX ?? 10);
+  bPSRetryCount.value = String(def.features?.powerRetryCount ?? 5);
+
+  bTTEnabled.checked = !!def.features?.ttChanceEnabled;
+  bTTGreens.value = String(def.features?.ttGreens ?? 3);
+  bTTReds.value = String(def.features?.ttReds ?? 1);
+  bTTMaxRounds.value = String(def.features?.ttMaxRounds ?? 0);
+
+  // Lines
+  bLines.innerHTML = "";
+  def.lines.forEach((l, idx) => {
+    const item = document.createElement("div");
+    item.className = "lineItem";
+
+    const lab = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = !!l.enabled;
+    cb.onchange = () => { def.lines[idx].enabled = cb.checked; };
+    const txt = document.createElement("div");
+    txt.innerHTML = `<b>${l.name}</b><div style="color:var(--muted);font-size:12px;margin-top:2px;">Pattern: ${normalizePattern(l.pattern, def.reels).join("-")}</div>`;
+    lab.appendChild(cb);
+    lab.appendChild(txt);
+
+    const badge = document.createElement("div");
+    badge.className = "badge";
+    badge.textContent = `ID: ${l.id}`;
+
+    item.appendChild(lab);
+    item.appendChild(badge);
+    bLines.appendChild(item);
+  });
+
+  // Symbols
+  symbolTbody.innerHTML = "";
+  def.symbols.forEach((s, idx) => {
+    const tr = document.createElement("tr");
+    tr.appendChild(tdInput(s.icon, (v)=>def.symbols[idx].icon = v));
+    tr.appendChild(tdInput(s.name, (v)=>def.symbols[idx].name = v));
+    tr.appendChild(tdInputNum(s.weight, 1, 999, (v)=>def.symbols[idx].weight = v));
+    tr.appendChild(tdInputNum(s.pay[3] ?? 0, 0, 999999, (v)=>def.symbols[idx].pay[3] = v));
+    tr.appendChild(tdInputNum(s.pay[4] ?? 0, 0, 999999, (v)=>def.symbols[idx].pay[4] = v));
+    tr.appendChild(tdInputNum(s.pay[5] ?? 0, 0, 999999, (v)=>def.symbols[idx].pay[5] = v));
+
+    const tdDel = document.createElement("td");
+    const del = document.createElement("button");
+    del.className = "mini del";
+    del.textContent = "Löschen";
+    del.onclick = () => {
+      if (def.symbols.length <= 3) return alert("Mindestens 3 Symbole lassen.");
+      def.symbols.splice(idx,1);
+      renderBuilder();
+    };
+    tdDel.appendChild(del);
+    tr.appendChild(tdDel);
+
+    symbolTbody.appendChild(tr);
+  });
+
+  jsonBox.value = JSON.stringify(def, null, 2);
+}
+
+function applyBuilderToDef() {
+  if (!isAdmin) return;
+
+  def.name = String(bName.value || "My Slot");
+  def.startCredits = Math.max(0, Number(bStartCredits.value)|0);
+  def.accent = String(bAccent.value || "#00e5ff");
+  def.reels = (Number(bReels.value) === 3) ? 3 : 5;
+  def.reelMode = (bReelMode.value === "stacked") ? "stacked" : "independent";
+
+  def.features = def.features || {};
+  def.features.powerSpinsEnabled = !!bPSEnabled.checked;
+  def.features.powerSpinsCount = clampInt(bPSCount.value, 1, 99);
+  def.features.powerRetryX = clampInt(bPSRetrigX.value, 1, 200);
+  def.features.powerRetryCount = clampInt(bPSRetryCount.value, 1, 99);
+
+  def.features.ttChanceEnabled = !!bTTEnabled.checked;
+  def.features.ttGreens = clampInt(bTTGreens.value, 1, 20);
+  def.features.ttReds = clampInt(bTTReds.value, 1, 20);
+  def.features.ttMaxRounds = clampInt(bTTMaxRounds.value, 0, 99);
+
+  // normalize lines patterns length to reels
+  def.lines = def.lines.map(l => ({ ...l, pattern: normalizePattern(l.pattern, def.reels) }));
+
+  def = normalizeDef(def);
+  setCurrentDef(def);
+
+  weightedBag = buildWeightedBag();
+  applyAccent();
+
+  renderReels();
+  for (let r=0;r<def.reels;r++){
+    if (def.reelMode === "stacked") {
+      const sym = randomSymbolFromBag();
+      for (let row=0;row<def.rows;row++) renderCell(cellMatrix[row][r], sym);
     } else {
-      setEvent("<b>Auto-Spin</b> ❌ gestoppt");
+      for (let row=0;row<def.rows;row++) renderCell(cellMatrix[row][r], randomSymbolFromBag());
     }
-  });
-
-  wheelBtn.addEventListener("click", openWheelModal);
-  closeWheelModal.addEventListener("click", closeWheelModalNow);
-  spinWheelBtn.addEventListener("click", spinDailyWheel);
-
-  slotSelect.addEventListener("change", () => {
-    state.selectedSlotId = slotSelect.value;
-    saveState();
-    renderTopMeta();
-    rebuildBoardsForSlot();
-    fillSlotOptions();
-    setEvent(`Slot gewechselt: <b>${getSelectedSlot().name}</b>`);
-    stopAutoSpin("Slot gewechselt");
-  });
-
-  betSelect.addEventListener("change", () => {
-    state.bet = Number(betSelect.value);
-    saveState();
-    setStatus("Einsatz gesetzt: " + eur(state.bet));
-    setEvent(`Einsatz: <b>${eur(state.bet)}</b>`);
-  });
-
-  closePowerModal.addEventListener("click", () => {
-    if (pendingPower) {
-      const w = pendingPower.baseWin;
-      state.balance = Math.round((state.balance + w) * 100) / 100;
-      saveState();
-      renderBalance();
-      setEvent(`<b>Gewinn genommen</b> ✅ +${eur(w)} (Power abgelehnt)`);
-      pendingPower = null;
-    }
-    closePowerModalNow();
-  });
-
-  powerBuyRange.addEventListener("input", () => {
-    if (!pendingPower) return;
-    syncPowerBuyText(pendingPower.bet);
-  });
-
-  takeWinBtn.addEventListener("click", () => {
-    if (!pendingPower) return;
-    const w = pendingPower.baseWin;
-    state.balance = Math.round((state.balance + w) * 100) / 100;
-    saveState();
-    renderBalance();
-    setEvent(`<b>Gewinn genommen</b> ✅ +${eur(w)}`);
-    pendingPower = null;
-    closePowerModalNow();
-  });
-
-  buyPowerBtn.addEventListener("click", async () => {
-    if (!pendingPower) return;
-
-    const info = pendingPower;
-    const spins = Number(powerBuyRange.value);
-    const maxSpins = Math.max(1, Math.floor(info.baseWin / (info.bet * 4)));
-
-    if (spins < 1 || spins > maxSpins) {
-      alert("Ungültige Spin-Anzahl.");
-      return;
-    }
-
-    pendingPower = null;
-    closePowerModalNow();
-    await startPowerSpins(info, spins);
-  });
-
-  window.addEventListener("keydown", (e) => {
-    const ctrlAlt = e.ctrlKey && e.altKey;
-    const isHash = (e.key === "#") || (e.code === "Digit3") || (e.code === "Backslash");
-
-    if (ctrlAlt && isHash) {
-      e.preventDefault();
-      tryOpenAdmin();
-    }
-  });
-
-  closeAdmin.addEventListener("click", closeAdminNow);
-
-  adminSetBalanceBtn.addEventListener("click", () => {
-    const v = Number(adminBalanceInput.value);
-    if (!Number.isFinite(v) || v < 0) return alert("Ungültig.");
-
-    state.balance = Math.round(v * 100) / 100;
-    saveState();
-    renderBalance();
-    alert("Balance gesetzt: " + eur(state.balance));
-  });
-
-  adminResetWheelBtn.addEventListener("click", () => {
-    state.lastWheelAt = 0;
-    saveState();
-    updateWheelCooldownUI();
-    updateWheelModalText();
-    alert("Wheel Cooldown zurückgesetzt.");
-  });
-
-  adminExportDataBtn.addEventListener("click", exportAllData);
-  adminResetAllBtn.addEventListener("click", resetAll);
-
-  builderSlotSelect.addEventListener("change", refreshBuilderJson);
-  builderSaveBtn.addEventListener("click", saveBuilderJson);
-  builderNewBtn.addEventListener("click", builderNewSlot);
-  builderCloneBtn.addEventListener("click", builderCloneSelected);
-  builderDeleteBtn.addEventListener("click", builderDeleteSelected);
-  builderExportSlotBtn.addEventListener("click", builderExportSlot);
-  builderImportSlotBtn.addEventListener("click", builderImportSlot);
-
-  setInterval(() => {
-    updateWheelCooldownUI();
-    if (!wheelModalOverlay.classList.contains("hidden")) updateWheelModalText();
-  }, 1000);
-
-  function initUI() {
-    renderBalance();
-    fillBetOptions();
-    fillSlotOptions();
-    renderTopMeta();
-    rebuildBoardsForSlot();
-    updateWheelCooldownUI();
-    setStatus("Bereit.");
-    setEvent("—");
   }
 
-  initUI();
-})();
+  renderSlotSelects();
+  syncHUD();
+  setMsg("Builder gespeichert. Play aktualisiert.");
+}
+
+/* Slot management */
+function createNewSlot(){
+  const id = `slot_${Date.now()}`;
+  const newDef = normalizeDef({ ...structuredClone(DEFAULT_DEF), name: `New Slot ${slots.length+1}` });
+  slots.push({ id, def: newDef });
+  saveSlots();
+
+  currentSlotId = id;
+  localStorage.setItem(LS_CURRENT_SLOT, currentSlotId);
+
+  def = getCurrentDef();
+  weightedBag = buildWeightedBag();
+  state = { credits: def.startCredits, betPerLine: 1, auto: false };
+  stateMap[currentSlotId] = state;
+  saveStateMap();
+
+  applyAccent();
+  renderSlotSelects();
+  renderReels();
+  syncHUD();
+  renderBuilder();
+}
+function duplicateSlot(){
+  const id = `slot_${Date.now()}`;
+  const copy = normalizeDef({ ...structuredClone(def), name: def.name + " (Copy)" });
+  slots.push({ id, def: copy });
+  saveSlots();
+  renderSlotSelects();
+}
+function deleteSlot(){
+  if (slots.length <= 1) return alert("Mindestens 1 Slot muss bleiben.");
+  if (!confirm("Diesen Slot wirklich löschen?")) return;
+
+  const idx = slots.findIndex(s => s.id === currentSlotId);
+  if (idx < 0) return;
+
+  const removed = slots.splice(idx, 1)[0];
+  delete stateMap[removed.id];
+  saveStateMap();
+  saveSlots();
+
+  currentSlotId = slots[0].id;
+  localStorage.setItem(LS_CURRENT_SLOT, currentSlotId);
+  def = getCurrentDef();
+  state = getCurrentState();
+  weightedBag = buildWeightedBag();
+
+  applyAccent();
+  renderSlotSelects();
+  renderReels();
+  syncHUD();
+  renderBuilder();
+}
+
+/* Switch slot */
+function switchSlot(id){
+  if (!slots.some(s => s.id === id)) return;
+
+  currentSlotId = id;
+  localStorage.setItem(LS_CURRENT_SLOT, currentSlotId);
+
+  def = getCurrentDef();
+  state = getCurrentState();
+  weightedBag = buildWeightedBag();
+
+  // stop features
+  state.auto = false;
+  if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+  saveCurrentState();
+  if (ps.active) psClose();
+  if (ttc.active) ttcClose();
+
+  applyAccent();
+  renderSlotSelects();
+  renderReels();
+
+  for (let r=0;r<def.reels;r++){
+    if (def.reelMode === "stacked") {
+      const sym = randomSymbolFromBag();
+      for (let row=0;row<def.rows;row++) renderCell(cellMatrix[row][r], sym);
+    } else {
+      for (let row=0;row<def.rows;row++) renderCell(cellMatrix[row][r], randomSymbolFromBag());
+    }
+  }
+
+  syncHUD();
+  setMsg(`Slot gewechselt: ${def.name}`);
+}
+
+/* =========================
+   Events
+========================= */
+slotSelect.onchange = () => switchSlot(slotSelect.value);
+bSlotSelect.onchange = () => { if (!isAdmin) return; switchSlot(bSlotSelect.value); renderBuilder(); };
+
+spinBtn.onclick = () => spinOnce();
+
+autoBtn.onclick = () => {
+  if (ps.active || ttc.active) return;
+  state.auto = !state.auto;
+  saveCurrentState();
+  syncHUD();
+  if (!state.auto && autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+  if (state.auto && !spinning) spinOnce();
+};
+
+simBtn.onclick = () => simulate(10000);
+
+betDown.onclick = () => {
+  if (ps.active || ttc.active) return;
+  state.betPerLine = Math.max(1, (state.betPerLine|0) - 1);
+  saveCurrentState();
+  syncHUD();
+};
+betUp.onclick = () => {
+  if (ps.active || ttc.active) return;
+  state.betPerLine = Math.min(100, (state.betPerLine|0) + 1);
+  saveCurrentState();
+  syncHUD();
+};
+
+soundToggle.onclick = async () => {
+  audioOn = !audioOn;
+  if (audioOn) {
+    ensureAudio();
+    if (AC && AC.state === "suspended") await AC.resume();
+    beep(440, 80, "triangle", 0.06);
+  }
+  syncHUD();
+};
+
+resetCredits.onclick = () => {
+  if (ps.active || ttc.active) return;
+  state.credits = def.startCredits;
+  saveCurrentState();
+  syncHUD();
+  setMsg("Credits zurückgesetzt.");
+};
+
+addSymbolBtn.onclick = () => {
+  if (!isAdmin) return;
+  def.symbols.push({ id:`sym_${Date.now()}`, icon:"🟣", name:"New", weight:10, pay:{3:5,4:20,5:120} });
+  renderBuilder();
+};
+
+exportBtn.onclick = () => { jsonBox.value = JSON.stringify(def, null, 2); jsonBox.focus(); jsonBox.select(); };
+importBtn.onclick = () => {
+  if (!isAdmin) return;
+  try {
+    const parsed = JSON.parse(jsonBox.value);
+    def = normalizeDef(parsed);
+    setCurrentDef(def);
+    renderBuilder();
+    alert("Import OK. Jetzt 'Speichern & Anwenden' drücken.");
+  } catch (e) { alert("JSON ungültig: " + e.message); }
+};
+saveBtn.onclick = () => { applyBuilderToDef(); showPlay(); };
+
+newSlotBtn.onclick = () => { if (isAdmin) createNewSlot(); };
+dupSlotBtn.onclick = () => { if (isAdmin) duplicateSlot(); };
+delSlotBtn.onclick = () => { if (isAdmin) deleteSlot(); };
+
+/* =========================
+   Boot
+========================= */
+function boot() {
+  def = normalizeDef(def);
+  weightedBag = buildWeightedBag();
+  applyAccent();
+
+  renderSlotSelects();
+  applyAdminUI();
+  renderReels();
+
+  for (let r=0;r<def.reels;r++){
+    if (def.reelMode === "stacked") {
+      const sym = randomSymbolFromBag();
+      for (let row=0;row<def.rows;row++) renderCell(cellMatrix[row][r], sym);
+    } else {
+      for (let row=0;row<def.rows;row++) renderCell(cellMatrix[row][r], randomSymbolFromBag());
+    }
+  }
+
+  syncHUD();
+  setMsg("Bereit. (Ctrl+Alt+# → Admin Unlock)");
+}
+boot();
