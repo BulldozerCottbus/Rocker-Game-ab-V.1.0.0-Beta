@@ -1,1119 +1,949 @@
-(() => {
-  "use strict";
+'use strict';
 
-  /* =========================
-     Storage / State
-  ========================= */
-  const STORAGE_KEY = "multiSlotSystem.v4";
-  const DAY_MS = 24 * 60 * 60 * 1000;
+const SAVE_KEY = 'road_charter_block_empire_v1';
+const TICK_MS = 3000;
+const MAX_OFFLINE_SECONDS = 60 * 60 * 4;
 
-  const defaultState = {
-    balance: 20.00,
-    bet: 0.10,
-    selectedSlotId: "lucky_pharaoh",
-    lastWheelAt: 0,
-    customSlots: {},
-    soundOn: true,
-  };
+const $ = (selector) => document.querySelector(selector);
+const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
-  function loadState() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return { ...defaultState };
-      const parsed = JSON.parse(raw);
-      return {
-        ...defaultState,
-        ...parsed,
-        customSlots: parsed.customSlots && typeof parsed.customSlots === "object" ? parsed.customSlots : {},
-      };
-    } catch {
-      return { ...defaultState };
-    }
+const fmtMoney = (value) => `${Math.floor(value).toLocaleString('de-DE')} $`;
+const fmtNum = (value) => Math.floor(value).toLocaleString('de-DE');
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+const BUILDING_BLUEPRINTS = [
+  {
+    id: 'clubhouse',
+    icon: '🏚️',
+    name: 'Clubhouse',
+    desc: 'Zentrale des Charters. Erhöht Crew-Limit, Respekt-Gewinn und schaltet stärkere Upgrades frei.',
+    baseCost: 250,
+    costGrowth: 1.85,
+    respectCost: 0,
+    maxLevel: 20,
+    effects: { crewCap: 4, respectPerTick: 1, defense: 2 }
+  },
+  {
+    id: 'cashvault',
+    icon: '💰',
+    name: 'Geldlager',
+    desc: 'Mehr Lagerplatz für Einnahmen. Ohne Lager-Ausbau geht dir später viel Geld verloren.',
+    baseCost: 180,
+    costGrowth: 1.75,
+    respectCost: 0,
+    maxLevel: 25,
+    effects: { storage: 1600, defense: 1 }
+  },
+  {
+    id: 'garage',
+    icon: '🔧',
+    name: 'Bike-Werkstatt',
+    desc: 'Verbessert Bike-Power, Runs und Verteidigung. Vom Gefühl her wie ein CoC-Labor.',
+    baseCost: 340,
+    costGrowth: 1.9,
+    respectCost: 4,
+    maxLevel: 20,
+    effects: { power: 5, defense: 2 }
+  },
+  {
+    id: 'nomadcamp',
+    icon: '⛺',
+    name: 'Nomad Camp',
+    desc: 'Hier kommen neue Fahrer dazu. Gibt Crew-Kapazität und kleine passive Einnahmen.',
+    baseCost: 460,
+    costGrowth: 1.8,
+    respectCost: 8,
+    maxLevel: 20,
+    effects: { crewCap: 6, income: 5 }
+  },
+  {
+    id: 'bar',
+    icon: '🍻',
+    name: 'Road Bar',
+    desc: 'Legal getarnter Treffpunkt. Bringt stabile Einnahmen und Respekt in der Gegend.',
+    baseCost: 520,
+    costGrowth: 1.72,
+    respectCost: 6,
+    maxLevel: 20,
+    effects: { income: 16, respectPerTick: 1 }
+  },
+  {
+    id: 'eastblock',
+    icon: '🏙️',
+    name: 'East Block',
+    desc: 'Erster Stadtblock. Je höher der Block, desto mehr Cash, aber etwas mehr Heat.',
+    baseCost: 750,
+    costGrowth: 1.82,
+    respectCost: 12,
+    maxLevel: 20,
+    effects: { income: 28, heat: 0.18, control: 3 }
+  },
+  {
+    id: 'harbor',
+    icon: '⚓',
+    name: 'Harbor Block',
+    desc: 'Hafenviertel mit starken Einnahmen. Braucht Crew und verursacht höheren Stadt-Druck.',
+    baseCost: 1100,
+    costGrowth: 1.86,
+    respectCost: 18,
+    maxLevel: 20,
+    effects: { income: 42, heat: 0.28, control: 5 }
+  },
+  {
+    id: 'industrial',
+    icon: '🏭',
+    name: 'Industrial Block',
+    desc: 'Industriegebiet. Teuer, aber stark für Einkommen, Lager und Verteidigung.',
+    baseCost: 1550,
+    costGrowth: 1.88,
+    respectCost: 25,
+    maxLevel: 20,
+    effects: { income: 55, storage: 500, defense: 4, heat: 0.22 }
+  },
+  {
+    id: 'lookout',
+    icon: '👁️',
+    name: 'Lookout Posten',
+    desc: 'Senkt Risiko bei Runs und bremst Heat-Zuwachs durch bessere Übersicht.',
+    baseCost: 900,
+    costGrowth: 1.78,
+    respectCost: 16,
+    maxLevel: 20,
+    effects: { defense: 5, heatReduce: 0.14 }
   }
-  let state = loadState();
-  function saveState() { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+];
 
-  /* =========================
-     RNG
-  ========================= */
-  function rand01() { const b = new Uint32Array(1); crypto.getRandomValues(b); return b[0] / 2 ** 32; }
-  function randInt(a, b) { return a + Math.floor(rand01() * (b - a + 1)); }
-  function weightedChoice(map) {
-    const entries = Object.entries(map).filter(([, w]) => Number(w) > 0);
-    let total = 0;
-    for (const [, w] of entries) total += Number(w);
-    if (total <= 0) return entries.length ? entries[0][0] : null;
-    let pick = rand01() * total;
-    for (const [k, w] of entries) { pick -= Number(w); if (pick <= 0) return k; }
-    return entries[entries.length - 1][0];
+const UNIT_BLUEPRINTS = [
+  {
+    id: 'hangaround',
+    icon: '🧢',
+    name: 'Hangaround',
+    desc: 'Günstiger Einstieg. Hilft beim Geldfluss, ist aber schwach in Runs.',
+    baseCash: 160,
+    baseRespect: 0,
+    power: 2,
+    income: 2,
+    capUse: 1
+  },
+  {
+    id: 'prospect',
+    icon: '🦺',
+    name: 'Prospect',
+    desc: 'Solider Aufbau-Fahrer. Bringt mehr Power und etwas passives Einkommen.',
+    baseCash: 420,
+    baseRespect: 6,
+    power: 6,
+    income: 4,
+    capUse: 1
+  },
+  {
+    id: 'member',
+    icon: '🛡️',
+    name: 'Member',
+    desc: 'Starkes Rückgrat für Charter-Kontrolle und erfolgreiche Runs.',
+    baseCash: 950,
+    baseRespect: 15,
+    power: 16,
+    income: 8,
+    capUse: 2
+  },
+  {
+    id: 'roadcaptain',
+    icon: '🏍️',
+    name: 'Road Captain',
+    desc: 'Verbessert Missionen deutlich und erhöht Kontrolle in allen Blöcken.',
+    baseCash: 2200,
+    baseRespect: 35,
+    power: 38,
+    income: 15,
+    capUse: 3
+  },
+  {
+    id: 'nomad',
+    icon: '🔥',
+    name: 'Nomad',
+    desc: 'Teuer, aber extrem stark. Ideal für schwierige Runs und Block-Kontrolle.',
+    baseCash: 5200,
+    baseRespect: 80,
+    power: 95,
+    income: 35,
+    capUse: 5
   }
+];
 
-  /* =========================
-     Audio (optional)
-  ========================= */
-  class AudioEngine {
-    constructor() { this.ctx = null; this.master = null; this.ambGain = null; this.ambOsc = null; this.started = false; }
-    ensure() {
-      if (this.started) return;
-      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-      this.master = this.ctx.createGain();
-      this.master.gain.value = 0.22;
-      this.master.connect(this.ctx.destination);
-
-      this.ambGain = this.ctx.createGain();
-      this.ambGain.gain.value = 0.06;
-      this.ambGain.connect(this.master);
-
-      this.ambOsc = this.ctx.createOscillator();
-      this.ambOsc.type = "sine";
-      this.ambOsc.frequency.value = 55;
-      this.ambOsc.connect(this.ambGain);
-      this.ambOsc.start();
-
-      const lfo = this.ctx.createOscillator();
-      lfo.type = "sine";
-      lfo.frequency.value = 0.12;
-      const lfoGain = this.ctx.createGain();
-      lfoGain.gain.value = 0.02;
-      lfo.connect(lfoGain);
-      lfoGain.connect(this.ambGain.gain);
-      lfo.start();
-
-      this.started = true;
-    }
-    blip(freq, dur = 0.06, vol = 0.12, type = "square") {
-      if (!this.started || !state.soundOn) return;
-      const o = this.ctx.createOscillator();
-      const g = this.ctx.createGain();
-      o.type = type; o.frequency.value = freq; g.gain.value = vol;
-      o.connect(g); g.connect(this.master);
-      const t = this.ctx.currentTime;
-      g.gain.setValueAtTime(vol, t);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-      o.start(t); o.stop(t + dur);
-    }
-    reelTick() { this.blip(520 + randInt(-40, 40), 0.05, 0.08, "square"); }
-    reelStop() { this.blip(220, 0.08, 0.10, "triangle"); }
-    win() { this.blip(740, 0.10, 0.14, "sine"); setTimeout(() => this.blip(980, 0.10, 0.14, "sine"), 90); }
-    lose(){ this.blip(140, 0.12, 0.11, "sawtooth"); }
+const MISSION_BLUEPRINTS = [
+  {
+    id: 'neighborhood',
+    icon: '🧭',
+    name: 'Neighborhood Run',
+    desc: 'Kleiner Stadtlauf. Gut für den Start und wenig Risiko.',
+    requiredPower: 8,
+    cash: 360,
+    respect: 7,
+    heat: 3,
+    cooldown: 20
+  },
+  {
+    id: 'blockdeal',
+    icon: '📦',
+    name: 'Block-Deal',
+    desc: 'Mittlere Operation mit besserer Beute, aber spürbar mehr Aufmerksamkeit.',
+    requiredPower: 36,
+    cash: 1300,
+    respect: 22,
+    heat: 7,
+    cooldown: 35
+  },
+  {
+    id: 'rivalpush',
+    icon: '🐺',
+    name: 'Rivalen zurückdrängen',
+    desc: 'Taktischer PvE-Kampf gegen eine fiktive Stadtfraktion.',
+    requiredPower: 85,
+    cash: 3100,
+    respect: 55,
+    heat: 12,
+    cooldown: 55
+  },
+  {
+    id: 'statewide',
+    icon: '🛣️',
+    name: 'Statewide Ride',
+    desc: 'Großer Run für fortgeschrittene Charters. Hohe Gewinne, hohes Risiko.',
+    requiredPower: 180,
+    cash: 8500,
+    respect: 145,
+    heat: 20,
+    cooldown: 85
   }
-  const audio = new AudioEngine();
+];
 
-  /* =========================
-     Slot Config (Lucky Pharaoh)
-     - Auszahlung: Multiplikator × Gesamteinsatz (wie Bild)
-  ========================= */
-  const WILD = "__WILD__";
-  const SYM = {
-    MASK: "MASK", DIA: "DIA", RUB: "RUB", SAP: "SAP", EME: "EME",
-    A: "A", K: "K", Q: "Q", J: "J", T10: "10",
-  };
+const FACTION_BLUEPRINTS = [
+  {
+    id: 'police',
+    icon: '🚓',
+    name: 'City Police',
+    desc: 'Lokaler Druck. Steigt durch hohe Heat-Werte und unruhige Blocks.',
+    baseCost: 500,
+    heatDrop: 12
+  },
+  {
+    id: 'atf',
+    icon: '🕵️',
+    name: 'ATF Taskforce',
+    desc: 'Wird relevant, sobald dein Charter größer wird. Teurer zu beruhigen.',
+    baseCost: 1450,
+    heatDrop: 18
+  },
+  {
+    id: 'fbi',
+    icon: '🏛️',
+    name: 'Federal Bureau',
+    desc: 'Späte Spielphase. Hoher Druck bedeutet mehr Kosten und Risk-Events.',
+    baseCost: 4200,
+    heatDrop: 26
+  },
+  {
+    id: 'rivals',
+    icon: '🐍',
+    name: 'Snake County Crew',
+    desc: 'Fiktive Rivalenfraktion. Beruhigen senkt Heat und Rivalen-Störungen.',
+    baseCost: 2400,
+    heatDrop: 20
+  }
+];
 
-  function makeLuckyPharaohSlot() {
+const PERKS = [
+  {
+    id: 'leadership',
+    icon: '👑',
+    name: 'Leadership',
+    desc: 'Mehr Crew-Kapazität und bessere Missionserfolge.',
+    max: 10,
+    cash: 800,
+    respect: 20
+  },
+  {
+    id: 'mechanic',
+    icon: '🛠️',
+    name: 'Mechanic',
+    desc: 'Mehr Power aus Bike-Werkstatt und Nomads.',
+    max: 10,
+    cash: 950,
+    respect: 24
+  },
+  {
+    id: 'streetwise',
+    icon: '🃏',
+    name: 'Streetwise',
+    desc: 'Senkt Heat-Risiko bei Missionen und Upgrades.',
+    max: 10,
+    cash: 1200,
+    respect: 30
+  },
+  {
+    id: 'logistics',
+    icon: '📊',
+    name: 'Logistics',
+    desc: 'Mehr Lagerplatz und höhere passive Einnahmen.',
+    max: 10,
+    cash: 1100,
+    respect: 28
+  }
+];
+
+const defaultState = () => ({
+  version: 1,
+  name: 'Iron Wolves Charter',
+  leaderName: 'Road Captain',
+  cash: 950,
+  respect: 20,
+  heat: 6,
+  level: 1,
+  xp: 0,
+  lastTick: Date.now(),
+  buildings: Object.fromEntries(BUILDING_BLUEPRINTS.map((b, i) => [b.id, { level: i < 3 ? 1 : 0 }])),
+  units: Object.fromEntries(UNIT_BLUEPRINTS.map((u) => [u.id, { count: 0 }])),
+  factions: Object.fromEntries(FACTION_BLUEPRINTS.map((f) => [f.id, { pressure: f.id === 'police' ? 15 : 5, lastBribe: 0 }])),
+  perks: Object.fromEntries(PERKS.map((p) => [p.id, { level: 0 }])),
+  missions: {},
+  log: [
+    { time: Date.now(), text: 'Charter gegründet. Baue dein Clubhouse, Lager und deine Crew auf.' }
+  ]
+});
+
+let state = loadState();
+let derived = getDerived();
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return defaultState();
+    const saved = JSON.parse(raw);
+    const fresh = defaultState();
     return {
-      id: "lucky_pharaoh",
-      name: "Lucky Pharaoh",
-      reels: 5,
-      rows: 3,
-      paylines: 10,
-      features: {
-        powerSpins: true,
-        powerTriggerMultiplier: 4,
-        mysterySymbol: SYM.MASK,
-        wildMode: true,
-        wildExpandChancePower: 0.06,
-      },
-      symbols: [
-        { key: SYM.MASK, label: "🎭" },
-        { key: SYM.DIA,  label: "💎" },
-        { key: SYM.RUB,  label: "🛑" },
-        { key: SYM.SAP,  label: "💠" },
-        { key: SYM.EME,  label: "❇️" },
-        { key: SYM.A,    label: "A" },
-        { key: SYM.K,    label: "K" },
-        { key: SYM.Q,    label: "Q" },
-        { key: SYM.J,    label: "J" },
-        { key: SYM.T10,  label: "10" },
-      ],
-      weights: {
-        base: {
-          [SYM.MASK]: 7, [SYM.DIA]: 5, [SYM.RUB]: 8, [SYM.SAP]: 9, [SYM.EME]: 10,
-          [SYM.A]: 14, [SYM.K]: 14, [SYM.Q]: 14, [SYM.J]: 14, [SYM.T10]: 16,
-        },
-        power: {
-          [SYM.MASK]: 7, [SYM.DIA]: 5, [SYM.RUB]: 9, [SYM.SAP]: 9, [SYM.EME]: 11,
-          [SYM.A]: 12, [SYM.K]: 12, [SYM.Q]: 15, [SYM.J]: 14, [SYM.T10]: 15,
-        }
-      },
-      paytable: {
-        [SYM.DIA]: { 3: 5,   4: 10,  5: 50 },
-        [SYM.RUB]: { 3: 4,   4: 10,  5: 40 },
-        [SYM.SAP]: { 3: 2,   4: 6,   5: 30 },
-        [SYM.EME]: { 3: 2,   4: 6,   5: 30 },
-        [SYM.A]:   { 3: 1,   4: 4,   5: 20 },
-        [SYM.K]:   { 3: 1,   4: 4,   5: 20 },
-        [SYM.Q]:   { 3: 0.5, 4: 2,   5: 10 },
-        [SYM.J]:   { 3: 0.5, 4: 2,   5: 10 },
-        [SYM.T10]: { 3: 0.5, 4: 2,   5: 10 },
-      }
+      ...fresh,
+      ...saved,
+      buildings: { ...fresh.buildings, ...(saved.buildings || {}) },
+      units: { ...fresh.units, ...(saved.units || {}) },
+      factions: { ...fresh.factions, ...(saved.factions || {}) },
+      perks: { ...fresh.perks, ...(saved.perks || {}) },
+      missions: saved.missions || {},
+      log: Array.isArray(saved.log) ? saved.log.slice(0, 30) : fresh.log
     };
+  } catch (error) {
+    console.warn('Savegame konnte nicht geladen werden:', error);
+    return defaultState();
+  }
+}
+
+function saveState(silent = false) {
+  state.lastTick = Date.now();
+  localStorage.setItem(SAVE_KEY, JSON.stringify(state));
+  if (!silent) addLog('Spielstand gespeichert.');
+}
+
+function getBuilding(id) {
+  return BUILDING_BLUEPRINTS.find((building) => building.id === id);
+}
+
+function getUnit(id) {
+  return UNIT_BLUEPRINTS.find((unit) => unit.id === id);
+}
+
+function getPerk(id) {
+  return PERKS.find((perk) => perk.id === id);
+}
+
+function buildingCost(blueprint, level = state.buildings[blueprint.id].level) {
+  const next = level + 1;
+  return {
+    cash: Math.floor(blueprint.baseCost * Math.pow(blueprint.costGrowth, level)),
+    respect: Math.floor((blueprint.respectCost || 0) * Math.pow(1.38, Math.max(0, level - 1))),
+    next
+  };
+}
+
+function unitCost(unit) {
+  const count = state.units[unit.id].count;
+  return {
+    cash: Math.floor(unit.baseCash * Math.pow(1.18, count)),
+    respect: Math.floor(unit.baseRespect * Math.pow(1.12, count))
+  };
+}
+
+function perkCost(perk) {
+  const level = state.perks[perk.id].level;
+  return {
+    cash: Math.floor(perk.cash * Math.pow(1.72, level)),
+    respect: Math.floor(perk.respect * Math.pow(1.55, level))
+  };
+}
+
+function getDerived() {
+  const d = {
+    incomePerTick: 0,
+    respectPerTick: 0,
+    heatPerTick: 0,
+    heatReduce: 0,
+    storage: 1800,
+    crewCap: 5,
+    crewUsed: 0,
+    crewCount: 0,
+    power: 0,
+    defense: 0,
+    control: 0
+  };
+
+  for (const blueprint of BUILDING_BLUEPRINTS) {
+    const level = state.buildings[blueprint.id]?.level || 0;
+    if (level <= 0) continue;
+    const effects = blueprint.effects || {};
+    d.incomePerTick += (effects.income || 0) * level;
+    d.respectPerTick += (effects.respectPerTick || 0) * level;
+    d.heatPerTick += (effects.heat || 0) * level;
+    d.heatReduce += (effects.heatReduce || 0) * level;
+    d.storage += (effects.storage || 0) * level;
+    d.crewCap += (effects.crewCap || 0) * level;
+    d.power += (effects.power || 0) * level;
+    d.defense += (effects.defense || 0) * level;
+    d.control += (effects.control || 0) * level;
   }
 
-  function getAllSlots() {
-    const defaults = { lucky_pharaoh: makeLuckyPharaohSlot() };
-    return { ...defaults, ...(state.customSlots || {}) };
+  for (const unit of UNIT_BLUEPRINTS) {
+    const count = state.units[unit.id]?.count || 0;
+    d.crewCount += count;
+    d.crewUsed += unit.capUse * count;
+    d.power += unit.power * count;
+    d.incomePerTick += unit.income * count;
   }
 
-  const PAYLINES = [
-    [1,1,1,1,1],
-    [0,0,0,0,0],
-    [2,2,2,2,2],
-    [0,1,2,1,0],
-    [2,1,0,1,2],
-    [0,0,1,0,0],
-    [2,2,1,2,2],
-    [1,0,0,0,1],
-    [1,2,2,2,1],
-    [0,1,1,1,0],
-  ];
+  const leadership = state.perks.leadership.level;
+  const mechanic = state.perks.mechanic.level;
+  const streetwise = state.perks.streetwise.level;
+  const logistics = state.perks.logistics.level;
 
-  /* =========================
-     DOM
-  ========================= */
-  const $ = (id) => document.getElementById(id);
+  d.crewCap += leadership * 3;
+  d.power += mechanic * 12;
+  d.storage += logistics * 900;
+  d.incomePerTick *= 1 + logistics * 0.04;
+  d.heatReduce += streetwise * 0.08;
+  d.missionBonus = leadership * 2.4 + mechanic * 1.8 + d.defense * 0.15;
+  d.heatPerTick = Math.max(0, d.heatPerTick - d.heatReduce);
 
-  const slotSelect = $("slotSelect");
-  const betSelect = $("betSelect");
-  const spinBtn = $("spinBtn");
-  const autoBtn = $("autoBtn");
-  const midMsg = $("midMsg");
-  const slotMeta = $("slotMeta");
+  return d;
+}
 
-  const wheelBtn = $("wheelBtn");
-  const wheelCooldownText = $("wheelCooldownText");
+function canPay(cost) {
+  return state.cash >= cost.cash && state.respect >= cost.respect;
+}
 
-  const baseBoardEl = $("baseBoard");
-  const balanceBottom = $("balanceBottom");
+function pay(cost) {
+  state.cash -= cost.cash || 0;
+  state.respect -= cost.respect || 0;
+}
 
-  const soundBtn = $("soundBtn");
+function addLog(text) {
+  state.log.unshift({ time: Date.now(), text });
+  state.log = state.log.slice(0, 40);
+  renderLog();
+}
 
-  // Power Buy Modal
-  const powerModalOverlay = $("powerModalOverlay");
-  const powerModalText = $("powerModalText");
-  const powerBuyRange = $("powerBuyRange");
-  const powerBuySpins = $("powerBuySpins");
-  const powerBuyCost = $("powerBuyCost");
-  const takeWinBtn = $("takeWinBtn");
-  const buyPowerBtn = $("buyPowerBtn");
-  const closePowerModal = $("closePowerModal");
+function showModal(title, text) {
+  const modal = $('#modal');
+  $('#modalTitle').textContent = title;
+  $('#modalText').textContent = text;
+  if (typeof modal.showModal === 'function') modal.showModal();
+  else alert(`${title}\n\n${text}`);
+}
 
-  // Power Play Overlay
-  const powerPlayOverlay = $("powerPlayOverlay");
-  const powerStopBtn = $("powerStopBtn");
-  const powerCloseBtn = $("powerCloseBtn");
-  const powerSpinsLeftEl = $("powerSpinsLeft");
-  const powerSpinWinEl = $("powerSpinWin");
-  const powerTotalWinEl = $("powerTotalWin");
-  const pBoards = [ $("pBoard1"), $("pBoard2"), $("pBoard3"), $("pBoard4") ];
+function tick(seconds = TICK_MS / 1000) {
+  derived = getDerived();
+  const ticks = seconds / (TICK_MS / 1000);
+  const income = derived.incomePerTick * ticks;
+  const respectGain = derived.respectPerTick * ticks;
+  const heatGain = derived.heatPerTick * ticks;
 
-  // Wheel
-  const wheelModalOverlay = $("wheelModalOverlay");
-  const wheel = $("wheel");
-  const wheelInfo = $("wheelInfo");
-  const wheelReadyText = $("wheelReadyText");
-  const spinWheelBtn = $("spinWheelBtn");
-  const closeWheelModal = $("closeWheelModal");
+  const beforeCash = state.cash;
+  state.cash = clamp(state.cash + income, 0, derived.storage);
+  state.respect += respectGain;
+  state.heat = clamp(state.heat + heatGain, 0, 100);
 
-  // Admin / Builder
-  const adminOverlay = $("adminOverlay");
-  const closeAdmin = $("closeAdmin");
-  const adminBalanceInput = $("adminBalanceInput");
-  const adminSetBalanceBtn = $("adminSetBalanceBtn");
-  const adminResetWheelBtn = $("adminResetWheelBtn");
-  const adminExportDataBtn = $("adminExportDataBtn");
-  const adminResetAllBtn = $("adminResetAllBtn");
-
-  const builderNewBtn = $("builderNewBtn");
-  const builderCloneBtn = $("builderCloneBtn");
-  const builderDeleteBtn = $("builderDeleteBtn");
-  const builderSlotSelect = $("builderSlotSelect");
-  const builderJson = $("builderJson");
-  const builderSaveBtn = $("builderSaveBtn");
-  const builderExportSlotBtn = $("builderExportSlotBtn");
-  const builderImportSlotBtn = $("builderImportSlotBtn");
-
-  /* =========================
-     UI helpers
-  ========================= */
-  function eur(n){ return "€" + Number(n || 0).toFixed(2); }
-  function setMid(main, sub){
-    midMsg.querySelector(".midMain").textContent = main;
-    midMsg.querySelector(".midSub").textContent = sub || "";
-  }
-  function renderBalance(){
-    balanceBottom.textContent = eur(state.balance);
-  }
-  function getSelectedSlot(){
-    const all = getAllSlots();
-    return all[state.selectedSlotId] || all.lucky_pharaoh;
-  }
-  function renderSlotMeta(){
-    const s = getSelectedSlot();
-    slotMeta.textContent = `${s.reels}×${s.rows} · ${s.paylines} Linien · Paytable = Gesamt-Einsatz`;
+  if (state.cash >= derived.storage && beforeCash < derived.storage) {
+    addLog('Dein Geldlager ist voll. Werte das Geldlager auf, damit keine Einnahmen verloren gehen.');
   }
 
-  function fillBetOptions(){
-    const bets = [0.10,0.20,0.30,0.40,0.50,0.60,0.70,0.80,0.90,1.00,2.00,3.00,4.00,5.00,10.00];
-    betSelect.innerHTML = "";
-    for (const b of bets){
-      const o = document.createElement("option");
-      o.value = String(b);
-      o.textContent = eur(b);
-      betSelect.appendChild(o);
-    }
-    if (!bets.includes(Number(state.bet))) state.bet = 0.10;
-    betSelect.value = String(state.bet);
+  if (state.heat >= 85 && Math.random() < 0.16) {
+    const loss = Math.min(state.cash, Math.max(250, state.cash * 0.08));
+    state.cash -= loss;
+    state.heat = clamp(state.heat - 4, 0, 100);
+    addLog(`Risk-Event: Hoher Druck hat dich ${fmtMoney(loss)} gekostet.`);
   }
 
-  function fillSlotOptions(){
-    const all = getAllSlots();
-    slotSelect.innerHTML = "";
-    for (const [id, cfg] of Object.entries(all)){
-      const o = document.createElement("option");
-      o.value = id;
-      o.textContent = cfg.name + (id === "lucky_pharaoh" ? " (Default)" : "");
-      slotSelect.appendChild(o);
-    }
-    if (!all[state.selectedSlotId]) state.selectedSlotId = "lucky_pharaoh";
-    slotSelect.value = state.selectedSlotId;
+  renderAll();
+  saveState(true);
+}
 
-    builderSlotSelect.innerHTML = "";
-    for (const [id, cfg] of Object.entries(all)){
-      const o = document.createElement("option");
-      o.value = id;
-      o.textContent = cfg.name + (state.customSlots[id] ? " (Custom)" : " (Built-in)");
-      builderSlotSelect.appendChild(o);
-    }
-    builderSlotSelect.value = state.selectedSlotId;
+function applyOfflineProgress() {
+  const now = Date.now();
+  const last = state.lastTick || now;
+  const elapsed = Math.min(MAX_OFFLINE_SECONDS, Math.max(0, Math.floor((now - last) / 1000)));
+  if (elapsed < 15) return;
+  derived = getDerived();
+  const oldCash = state.cash;
+  const oldRespect = state.respect;
+  const oldHeat = state.heat;
+  state.cash = clamp(state.cash + derived.incomePerTick * (elapsed / 3), 0, derived.storage);
+  state.respect += derived.respectPerTick * (elapsed / 3);
+  state.heat = clamp(state.heat + derived.heatPerTick * (elapsed / 3), 0, 100);
+  state.lastTick = now;
+  const gainedCash = state.cash - oldCash;
+  const gainedRespect = state.respect - oldRespect;
+  const gainedHeat = state.heat - oldHeat;
+  addLog(`Offline-Fortschritt: +${fmtMoney(gainedCash)}, +${fmtNum(gainedRespect)} Respekt, +${Math.floor(gainedHeat)}% Heat.`);
+}
+
+function renderResources() {
+  derived = getDerived();
+  $('#clubName').textContent = state.name;
+  $('#cashValue').textContent = fmtMoney(state.cash);
+  $('#cashCap').textContent = `Lager: ${fmtMoney(derived.storage)}`;
+  $('#respectValue').textContent = fmtNum(state.respect);
+  $('#crewValue').textContent = `${fmtNum(derived.crewUsed)} / ${fmtNum(derived.crewCap)}`;
+  $('#powerValue').textContent = `Power: ${fmtNum(derived.power)}`;
+  $('#heatValue').textContent = `${Math.floor(state.heat)}%`;
+  $('#pressureValue').textContent = `Druck: ${pressureText(state.heat)}`;
+  $('#leaderName').textContent = state.leaderName;
+  $('#leaderStats').textContent = `Level ${state.level} · Einfluss ${fmtNum(state.xp)}`;
+}
+
+function pressureText(heat) {
+  if (heat < 25) return 'niedrig';
+  if (heat < 55) return 'mittel';
+  if (heat < 80) return 'hoch';
+  return 'kritisch';
+}
+
+function renderBuildings() {
+  const grid = $('#buildingGrid');
+  grid.innerHTML = '';
+
+  for (const blueprint of BUILDING_BLUEPRINTS) {
+    const data = state.buildings[blueprint.id];
+    const level = data.level || 0;
+    const cost = buildingCost(blueprint, level);
+    const maxed = level >= blueprint.maxLevel;
+    const affordable = canPay(cost);
+    const locked = blueprint.id === 'harbor' && (state.buildings.eastblock.level || 0) < 2;
+    const lockedIndustrial = blueprint.id === 'industrial' && (state.buildings.harbor.level || 0) < 2;
+    const isLocked = locked || lockedIndustrial;
+    const effectsText = effectText(blueprint.effects, level);
+
+    const card = document.createElement('article');
+    card.className = 'game-card';
+    card.innerHTML = `
+      <div class="card-head">
+        <div class="icon-badge">${blueprint.icon}</div>
+        <span class="level-pill">Lvl ${level}/${blueprint.maxLevel}</span>
+      </div>
+      <div>
+        <h4>${blueprint.name}</h4>
+        <p>${blueprint.desc}</p>
+      </div>
+      <div class="progress" aria-hidden="true"><span style="width:${(level / blueprint.maxLevel) * 100}%"></span></div>
+      <div class="stat-row">
+        <div class="stat-box"><small>Aktuell</small><strong>${effectsText || 'Noch kein Effekt'}</strong></div>
+        <div class="stat-box"><small>Nächster Preis</small><strong>${maxed ? 'Max' : `${fmtMoney(cost.cash)} · ${fmtNum(cost.respect)} R`}</strong></div>
+      </div>
+      <div class="card-actions">
+        <button class="primary-btn" data-upgrade="${blueprint.id}" ${maxed || !affordable || isLocked ? 'disabled' : ''}>${level === 0 ? 'Bauen' : 'Upgraden'}</button>
+      </div>
+      <div class="cost-line">${isLocked ? lockText(blueprint.id) : maxed ? 'Maximale Stufe erreicht.' : affordable ? `Upgrade auf Level ${cost.next} bereit.` : `Benötigt ${fmtMoney(Math.max(0, cost.cash - state.cash))} & ${fmtNum(Math.max(0, cost.respect - state.respect))} Respekt mehr.`}</div>
+    `;
+    grid.appendChild(card);
+  }
+}
+
+function lockText(id) {
+  if (id === 'harbor') return 'Benötigt East Block Level 2.';
+  if (id === 'industrial') return 'Benötigt Harbor Block Level 2.';
+  return 'Noch gesperrt.';
+}
+
+function effectText(effects, level) {
+  if (!effects || level <= 0) return '';
+  const parts = [];
+  if (effects.income) parts.push(`+${fmtMoney(effects.income * level)}/Tick`);
+  if (effects.storage) parts.push(`+${fmtMoney(effects.storage * level)} Lager`);
+  if (effects.crewCap) parts.push(`+${effects.crewCap * level} Crew`);
+  if (effects.power) parts.push(`+${effects.power * level} Power`);
+  if (effects.defense) parts.push(`+${effects.defense * level} Def`);
+  if (effects.control) parts.push(`+${effects.control * level} Kontrolle`);
+  return parts.slice(0, 2).join(' · ');
+}
+
+function renderUnits() {
+  const grid = $('#unitGrid');
+  grid.innerHTML = '';
+  derived = getDerived();
+
+  for (const unit of UNIT_BLUEPRINTS) {
+    const count = state.units[unit.id].count || 0;
+    const cost = unitCost(unit);
+    const hasCap = derived.crewUsed + unit.capUse <= derived.crewCap;
+    const affordable = canPay(cost);
+    const card = document.createElement('article');
+    card.className = 'game-card';
+    card.innerHTML = `
+      <div class="card-head">
+        <div class="icon-badge">${unit.icon}</div>
+        <span class="level-pill">${fmtNum(count)}x</span>
+      </div>
+      <div>
+        <h4>${unit.name}</h4>
+        <p>${unit.desc}</p>
+      </div>
+      <div class="stat-row">
+        <div class="stat-box"><small>Stärke</small><strong>+${unit.power} Power</strong></div>
+        <div class="stat-box"><small>Slot / Einnahme</small><strong>${unit.capUse} Slot · +${fmtMoney(unit.income)}/Tick</strong></div>
+      </div>
+      <div class="card-actions">
+        <button class="primary-btn" data-recruit="${unit.id}" ${!affordable || !hasCap ? 'disabled' : ''}>Rekrutieren</button>
+      </div>
+      <div class="cost-line">${hasCap ? `Kosten: ${fmtMoney(cost.cash)} · ${fmtNum(cost.respect)} Respekt` : 'Crew-Limit voll. Baue Clubhouse oder Nomad Camp aus.'}</div>
+    `;
+    grid.appendChild(card);
+  }
+}
+
+function renderMissions() {
+  const grid = $('#missionGrid');
+  grid.innerHTML = '';
+  derived = getDerived();
+  const now = Date.now();
+
+  for (const mission of MISSION_BLUEPRINTS) {
+    const readyAt = state.missions[mission.id] || 0;
+    const remaining = Math.max(0, Math.ceil((readyAt - now) / 1000));
+    const chance = missionChance(mission);
+    const card = document.createElement('article');
+    card.className = 'game-card';
+    card.innerHTML = `
+      <div class="card-head">
+        <div class="icon-badge">${mission.icon}</div>
+        <span class="level-pill">${chance}% Chance</span>
+      </div>
+      <div>
+        <h4>${mission.name}</h4>
+        <p>${mission.desc}</p>
+      </div>
+      <div class="progress" aria-hidden="true"><span style="width:${chance}%"></span></div>
+      <div class="stat-row">
+        <div class="stat-box"><small>Belohnung</small><strong>${fmtMoney(mission.cash)} · ${mission.respect} R</strong></div>
+        <div class="stat-box"><small>Risiko</small><strong>+${mission.heat}% Heat</strong></div>
+      </div>
+      <div class="card-actions">
+        <button class="primary-btn" data-run="${mission.id}" ${remaining > 0 || derived.power < Math.floor(mission.requiredPower * 0.45) ? 'disabled' : ''}>${remaining > 0 ? `${remaining}s` : 'Run starten'}</button>
+      </div>
+      <div class="cost-line">Empfohlen: ${mission.requiredPower} Power · Deine Power: ${fmtNum(derived.power)}</div>
+    `;
+    grid.appendChild(card);
+  }
+}
+
+function missionChance(mission) {
+  derived = getDerived();
+  const base = (derived.power + derived.missionBonus) / mission.requiredPower;
+  const heatPenalty = state.heat * 0.35;
+  return Math.floor(clamp(base * 70 + 18 - heatPenalty, 8, 96));
+}
+
+function renderFactions() {
+  const grid = $('#factionGrid');
+  grid.innerHTML = '';
+
+  for (const faction of FACTION_BLUEPRINTS) {
+    const data = state.factions[faction.id];
+    const pressure = clamp(data.pressure + state.heat * 0.25, 0, 100);
+    const cost = Math.floor(faction.baseCost * (1 + pressure / 70) * (1 + state.level * 0.04));
+    const canBribe = state.cash >= cost;
+    const card = document.createElement('article');
+    card.className = 'game-card';
+    card.innerHTML = `
+      <div class="card-head">
+        <div class="icon-badge">${faction.icon}</div>
+        <span class="level-pill">${Math.floor(pressure)}%</span>
+      </div>
+      <div>
+        <h4>${faction.name}</h4>
+        <p>${faction.desc}</p>
+      </div>
+      <div class="progress" aria-hidden="true"><span style="width:${pressure}%"></span></div>
+      <div class="stat-row">
+        <div class="stat-box"><small>Beruhigt</small><strong>-${faction.heatDrop}% Heat</strong></div>
+        <div class="stat-box"><small>Kosten</small><strong>${fmtMoney(cost)}</strong></div>
+      </div>
+      <div class="card-actions">
+        <button class="primary-btn" data-bribe="${faction.id}" ${!canBribe ? 'disabled' : ''}>Beruhigen</button>
+      </div>
+      <div class="cost-line">${canBribe ? 'Sofort möglich.' : `Es fehlen ${fmtMoney(cost - state.cash)}.`}</div>
+    `;
+    grid.appendChild(card);
+  }
+}
+
+function renderPerks() {
+  const grid = $('#perkGrid');
+  grid.innerHTML = '';
+
+  for (const perk of PERKS) {
+    const data = state.perks[perk.id];
+    const cost = perkCost(perk);
+    const maxed = data.level >= perk.max;
+    const affordable = canPay(cost);
+    const card = document.createElement('article');
+    card.className = 'game-card';
+    card.innerHTML = `
+      <div class="card-head">
+        <div class="icon-badge">${perk.icon}</div>
+        <span class="level-pill">Lvl ${data.level}/${perk.max}</span>
+      </div>
+      <div>
+        <h4>${perk.name}</h4>
+        <p>${perk.desc}</p>
+      </div>
+      <div class="progress" aria-hidden="true"><span style="width:${(data.level / perk.max) * 100}%"></span></div>
+      <div class="card-actions">
+        <button class="primary-btn" data-perk="${perk.id}" ${maxed || !affordable ? 'disabled' : ''}>Verbessern</button>
+      </div>
+      <div class="cost-line">${maxed ? 'Maximale Stufe erreicht.' : `Kosten: ${fmtMoney(cost.cash)} · ${fmtNum(cost.respect)} Respekt`}</div>
+    `;
+    grid.appendChild(card);
+  }
+}
+
+function renderLog() {
+  const list = $('#logList');
+  if (!list) return;
+  list.innerHTML = state.log.map((entry) => {
+    const time = new Date(entry.time).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+    return `<div class="log-item"><strong>${time}</strong> · ${entry.text}</div>`;
+  }).join('');
+}
+
+function renderAll() {
+  renderResources();
+  renderBuildings();
+  renderUnits();
+  renderMissions();
+  renderFactions();
+  renderPerks();
+  renderLog();
+}
+
+function upgradeBuilding(id) {
+  const blueprint = getBuilding(id);
+  if (!blueprint) return;
+  const current = state.buildings[id].level || 0;
+  if (current >= blueprint.maxLevel) return;
+  const cost = buildingCost(blueprint, current);
+  if (!canPay(cost)) return showModal('Nicht genug Ressourcen', 'Dir fehlen Geld oder Respekt für dieses Upgrade.');
+  pay(cost);
+  state.buildings[id].level = current + 1;
+  state.xp += 8 + state.buildings[id].level * 2;
+  maybeLevelUp();
+  addLog(`${blueprint.name} auf Level ${state.buildings[id].level} verbessert.`);
+  renderAll();
+  saveState(true);
+}
+
+function recruitUnit(id) {
+  const unit = getUnit(id);
+  if (!unit) return;
+  derived = getDerived();
+  if (derived.crewUsed + unit.capUse > derived.crewCap) {
+    return showModal('Crew-Limit voll', 'Baue Clubhouse, Nomad Camp oder Leadership aus, damit mehr Leute Platz haben.');
+  }
+  const cost = unitCost(unit);
+  if (!canPay(cost)) return showModal('Nicht genug Ressourcen', 'Dir fehlen Geld oder Respekt für diese Rekrutierung.');
+  pay(cost);
+  state.units[id].count += 1;
+  state.xp += 6 + unit.power * 0.2;
+  maybeLevelUp();
+  addLog(`${unit.name} rekrutiert.`);
+  renderAll();
+  saveState(true);
+}
+
+function runMission(id) {
+  const mission = MISSION_BLUEPRINTS.find((m) => m.id === id);
+  if (!mission) return;
+  const now = Date.now();
+  if ((state.missions[id] || 0) > now) return;
+  const chance = missionChance(mission);
+  const success = Math.random() * 100 <= chance;
+  const heatModifier = 1 - state.perks.streetwise.level * 0.025;
+  state.missions[id] = now + mission.cooldown * 1000;
+
+  if (success) {
+    const cashReward = mission.cash * (1 + state.perks.logistics.level * 0.03);
+    const respectReward = mission.respect * (1 + state.perks.leadership.level * 0.04);
+    state.cash = clamp(state.cash + cashReward, 0, derived.storage);
+    state.respect += respectReward;
+    state.heat = clamp(state.heat + mission.heat * heatModifier, 0, 100);
+    state.xp += mission.respect;
+    addLog(`${mission.name} erfolgreich: +${fmtMoney(cashReward)}, +${fmtNum(respectReward)} Respekt.`);
+  } else {
+    const loss = Math.min(state.cash, Math.floor(mission.cash * 0.28));
+    state.cash -= loss;
+    state.heat = clamp(state.heat + mission.heat * 1.45 * heatModifier, 0, 100);
+    addLog(`${mission.name} fehlgeschlagen: ${fmtMoney(loss)} verloren und Heat gestiegen.`);
   }
 
-  function updateWheelCooldownUI(){
-    const now = Date.now();
-    const next = (state.lastWheelAt || 0) + DAY_MS;
-    if (now >= next) {
-      wheelCooldownText.textContent = "Wheel: bereit";
-    } else {
-      const ms = next - now;
-      const h = Math.floor(ms / (60*60*1000));
-      const m = Math.floor((ms % (60*60*1000)) / (60*1000));
-      const s = Math.floor((ms % (60*1000)) / 1000);
-      wheelCooldownText.textContent = `Wheel: in ${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
-    }
+  maybeLevelUp();
+  renderAll();
+  saveState(true);
+}
+
+function bribeFaction(id) {
+  const faction = FACTION_BLUEPRINTS.find((f) => f.id === id);
+  if (!faction) return;
+  const data = state.factions[id];
+  const pressure = clamp(data.pressure + state.heat * 0.25, 0, 100);
+  const cost = Math.floor(faction.baseCost * (1 + pressure / 70) * (1 + state.level * 0.04));
+  if (state.cash < cost) return showModal('Zu wenig Geld', 'Du kannst diese Fraktion noch nicht beruhigen.');
+  state.cash -= cost;
+  state.heat = clamp(state.heat - faction.heatDrop, 0, 100);
+  data.pressure = clamp(data.pressure - 18, 0, 100);
+  data.lastBribe = Date.now();
+  addLog(`${faction.name} beruhigt. Heat um ${faction.heatDrop}% gesenkt.`);
+  renderAll();
+  saveState(true);
+}
+
+function improvePerk(id) {
+  const perk = getPerk(id);
+  if (!perk) return;
+  const data = state.perks[id];
+  if (data.level >= perk.max) return;
+  const cost = perkCost(perk);
+  if (!canPay(cost)) return showModal('Nicht genug Ressourcen', 'Dir fehlen Geld oder Respekt für dieses Training.');
+  pay(cost);
+  data.level += 1;
+  state.xp += 18 + data.level * 4;
+  maybeLevelUp();
+  addLog(`${perk.name} auf Level ${data.level} verbessert.`);
+  renderAll();
+  saveState(true);
+}
+
+function maybeLevelUp() {
+  let needed = state.level * 120;
+  while (state.xp >= needed) {
+    state.xp -= needed;
+    state.level += 1;
+    state.cash = clamp(state.cash + state.level * 180, 0, getDerived().storage);
+    state.respect += state.level * 12;
+    addLog(`Charter-Level ${state.level} erreicht. Bonus erhalten.`);
+    needed = state.level * 120;
   }
+}
 
-  /* =========================
-     Board build + cell update
-  ========================= */
-  function symbolDef(slot, key){
-    return slot.symbols.find(x => x.key === key) || { key, label: key };
+function collectIncome() {
+  derived = getDerived();
+  const bonus = Math.min(derived.storage - state.cash, Math.max(50, derived.incomePerTick * 6));
+  if (bonus <= 0) return showModal('Lager voll', 'Dein Geldlager ist voll. Baue es aus, bevor du mehr einsammelst.');
+  state.cash += bonus;
+  state.respect += Math.max(1, derived.respectPerTick * 2);
+  addLog(`Schnelleinnahmen eingesammelt: +${fmtMoney(bonus)}.`);
+  renderAll();
+  saveState(true);
+}
+
+function upgradeCheapest() {
+  const options = BUILDING_BLUEPRINTS
+    .map((blueprint) => ({ blueprint, level: state.buildings[blueprint.id].level || 0, cost: buildingCost(blueprint) }))
+    .filter((item) => item.level < item.blueprint.maxLevel && canPay(item.cost))
+    .sort((a, b) => (a.cost.cash + a.cost.respect * 25) - (b.cost.cash + b.cost.respect * 25));
+  if (!options.length) return showModal('Kein Upgrade bereit', 'Aktuell reicht es für kein Gebäude-Upgrade. Sammle mehr Geld oder Respekt.');
+  upgradeBuilding(options[0].blueprint.id);
+}
+
+function cooldownHeat() {
+  derived = getDerived();
+  const drop = Math.max(3, 6 + state.perks.streetwise.level + derived.defense * 0.04);
+  state.heat = clamp(state.heat - drop, 0, 100);
+  for (const key of Object.keys(state.factions)) {
+    state.factions[key].pressure = clamp((state.factions[key].pressure || 0) - 2, 0, 100);
   }
-  function safeClassKey(key){ return String(key).replace(/[^a-zA-Z0-9_-]/g, ""); }
+  addLog(`Heat aktiv abgebaut: -${Math.floor(drop)}%.`);
+  renderAll();
+  saveState(true);
+}
 
-  function buildBoard(boardEl, slot){
-    boardEl.innerHTML = "";
-    const cells = Array.from({length: slot.rows}, () => Array.from({length: slot.reels}, () => null));
-    for (let r=0; r<slot.rows; r++){
-      for (let c=0; c<slot.reels; c++){
-        const cell = document.createElement("div");
-        cell.className = "symbol";
-        const icon = document.createElement("div");
-        icon.className = "icon";
-        icon.textContent = "?";
-        cell.appendChild(icon);
-        boardEl.appendChild(cell);
-        cells[r][c] = cell;
-      }
-    }
-    boardEl._cells = cells;
+function trainLeader() {
+  const cost = {
+    cash: Math.floor(650 * Math.pow(1.5, state.level - 1)),
+    respect: Math.floor(18 * Math.pow(1.3, state.level - 1))
+  };
+  if (!canPay(cost)) {
+    return showModal('Training nicht möglich', `Du brauchst ${fmtMoney(cost.cash)} und ${fmtNum(cost.respect)} Respekt.`);
   }
+  pay(cost);
+  state.xp += 95;
+  maybeLevelUp();
+  addLog('Charaktertraining abgeschlossen. Einfluss steigt.');
+  renderAll();
+  saveState(true);
+}
 
-  function setCell(boardEl, slot, r, c, key){
-    const cell = boardEl._cells?.[r]?.[c];
-    if (!cell) return;
-    const def = symbolDef(slot, key);
-    const icon = cell.querySelector(".icon");
+function renameClub() {
+  const name = prompt('Neuer Charter-Name:', state.name);
+  if (!name) return;
+  state.name = name.trim().slice(0, 34) || state.name;
+  addLog(`Charter umbenannt in ${state.name}.`);
+  renderAll();
+  saveState(true);
+}
 
-    cell.classList.remove("win");
-    [...cell.classList].forEach(cl => { if (cl.startsWith("sym-")) cell.classList.remove(cl); });
-    cell.classList.add("sym-" + safeClassKey(key));
-    cell.dataset.key = key;
-    icon.textContent = def.label;
-  }
+function bindEvents() {
+  document.body.addEventListener('click', (event) => {
+    const target = event.target.closest('button');
+    if (!target) return;
 
-  function clearWin(boardEl){
-    boardEl.querySelectorAll(".symbol.win").forEach(el => el.classList.remove("win"));
-  }
-  function highlight(boardEl, positions){
-    for (const p of positions){
-      const el = boardEl._cells?.[p.r]?.[p.c];
-      if (el) el.classList.add("win");
-    }
-  }
-
-  /* =========================
-     Grid + wild
-  ========================= */
-  function generateGrid(slot, mode){
-    const w = mode === "power" ? slot.weights.power : slot.weights.base;
-    const g = Array.from({length: slot.rows}, () => Array.from({length: slot.reels}, () => SYM.T10));
-    for (let c=0; c<slot.reels; c++){
-      for (let r=0; r<slot.rows; r++){
-        g[r][c] = weightedChoice(w);
-      }
-    }
-    return g;
-  }
-
-  function applyMysteryAndWild(slot, grid, mode){
-    const out = grid.map(row => row.slice());
-    const mystery = slot.features.mysterySymbol;
-    const wildMode = !!slot.features.wildMode;
-    const chPower = Number(slot.features.wildExpandChancePower || 0);
-
-    for (let r=0; r<slot.rows; r++){
-      for (let c=0; c<slot.reels; c++){
-        if (out[r][c] === mystery){
-          if (wildMode) out[r][c] = WILD;
-          if (mode === "power" && chPower > 0 && rand01() < chPower){
-            for (let rr=0; rr<slot.rows; rr++) out[rr][c] = WILD;
-          }
-        }
-      }
-    }
-    return out;
-  }
-
-  /* =========================
-     Win eval (Left→Right)
-     payout = mult × totalBet
-  ========================= */
-  function evaluateWins(slot, evalGrid, betTotal){
-    let totalWin = 0;
-    const lineWins = [];
-
-    for (let li=0; li<PAYLINES.length; li++){
-      const pat = PAYLINES[li];
-      const seq = [];
-      const pos = [];
-      for (let c=0; c<slot.reels; c++){
-        const r = pat[c];
-        seq.push(evalGrid[r][c]);
-        pos.push({r, c});
-      }
-
-      let base = null;
-      let len = 0;
-      const positions = [];
-
-      for (let c=0; c<seq.length; c++){
-        const s = seq[c];
-        if (base === null){
-          if (s === WILD){ len++; positions.push(pos[c]); }
-          else { base = s; len++; positions.push(pos[c]); }
-        } else {
-          if (s === base || s === WILD){ len++; positions.push(pos[c]); }
-          else break;
-        }
-      }
-      if (base === null) base = SYM.DIA;
-
-      if (len >= 3){
-        const mult = slot.paytable?.[base]?.[len];
-        if (mult){
-          const amount = Math.round(mult * betTotal * 100) / 100;
-          totalWin += amount;
-          lineWins.push({ lineIndex: li, amount, symbol: base, length: len, positions: positions.slice(0, len) });
-        }
-      }
-    }
-
-    totalWin = Math.round(totalWin * 100) / 100;
-    return { totalWin, lineWins };
-  }
-
-  /* =========================
-     Reel animation + QUICK STOP
-  ========================= */
-  async function spinBoardAnimated(boardEl, slot, mode, finalGrid, stopToken){
-    boardEl.classList.add("reelSpinning");
-    const weights = mode === "power" ? slot.weights.power : slot.weights.base;
-
-    const intervals = [];
-    for (let c=0; c<slot.reels; c++){
-      const iv = setInterval(() => {
-        audio.reelTick();
-        for (let r=0; r<slot.rows; r++){
-          setCell(boardEl, slot, r, c, weightedChoice(weights));
-        }
-      }, 65);
-      intervals.push(iv);
-    }
-
-    const stopNow = () => {
-      for (const iv of intervals) clearInterval(iv);
-      for (let c=0; c<slot.reels; c++){
-        for (let r=0; r<slot.rows; r++){
-          setCell(boardEl, slot, r, c, finalGrid[r][c]);
-        }
-      }
-      boardEl.classList.remove("reelSpinning");
-    };
-
-    for (let c=0; c<slot.reels; c++){
-      // wenn STOP gedrückt -> sofort final setzen
-      if (stopToken?.stop) {
-        stopNow();
-        return;
-      }
-
-      const stopDelay = 520 + c * 240;
-      await wait(stopDelay);
-
-      if (stopToken?.stop) {
-        stopNow();
-        return;
-      }
-
-      clearInterval(intervals[c]);
-      for (let r=0; r<slot.rows; r++){
-        setCell(boardEl, slot, r, c, finalGrid[r][c]);
-      }
-      audio.reelStop();
-    }
-
-    boardEl.classList.remove("reelSpinning");
-  }
-
-  function wait(ms){ return new Promise(res => setTimeout(res, ms)); }
-
-  /* =========================
-     Game flow / Auto / Stop
-  ========================= */
-  let isSpinning = false;
-  let autoSpin = false;
-
-  // STOP für Base-Spin
-  let baseStopToken = { stop: false };
-
-  function stopAuto(reason){
-    if (!autoSpin) return;
-    autoSpin = false;
-    autoBtn.textContent = "AUTO: AUS";
-    autoBtn.classList.remove("primary");
-    setMid("Auto gestoppt", reason || "");
-  }
-
-  function setButtonsForSpin(spinning){
-    if (spinning){
-      spinBtn.textContent = "STOP";
-      spinBtn.classList.add("danger");
-    } else {
-      spinBtn.textContent = "SPIN";
-      spinBtn.classList.remove("danger");
-    }
-  }
-
-  async function spinBase(){
-    audio.ensure();
-
-    if (isSpinning) return;
-
-    const slot = getSelectedSlot();
-    const bet = Number(state.bet);
-
-    if (state.balance < bet){
-      setMid("Zu wenig €", "Daily Wheel oder Admin");
-      stopAuto("Balance zu niedrig");
-      audio.lose();
+    if (target.matches('.tab')) {
+      $$('.tab').forEach((tab) => tab.classList.toggle('active', tab === target));
+      $$('.screen').forEach((screen) => screen.classList.toggle('active-screen', screen.id === target.dataset.tab));
       return;
     }
 
-    isSpinning = true;
-    baseStopToken = { stop: false };
-    setButtonsForSpin(true);
-
-    // Bet abziehen
-    state.balance = Math.round((state.balance - bet) * 100) / 100;
-    saveState();
-    renderBalance();
-
-    setMid("Dreht…", `Einsatz ${eur(bet)}`);
-    clearWin(baseBoardEl);
-
-    const raw = generateGrid(slot, "base");
-    await spinBoardAnimated(baseBoardEl, slot, "base", raw, baseStopToken);
-
-    const evalGrid = applyMysteryAndWild(slot, raw, "base");
-    const res = evaluateWins(slot, evalGrid, bet);
-
-    clearWin(baseBoardEl);
-    for (const lw of res.lineWins) highlight(baseBoardEl, lw.positions);
-
-    const win = res.totalWin;
-
-    if (win > 0){
-      state.balance = Math.round((state.balance + win) * 100) / 100;
-      saveState();
-      renderBalance();
-      setMid("WIN ✅", `+${eur(win)} · Linien ${res.lineWins.length}`);
-      audio.win();
-
-      // Power Trigger?
-      if (slot.features.powerSpins && win >= slot.features.powerTriggerMultiplier * bet){
-        stopAuto("Power verfügbar");
-        pendingPower = { baseWin: win, bet, slotId: slot.id };
-        openPowerBuyModal(pendingPower);
-      }
-    } else {
-      setMid("LOSE ❌", `-${eur(bet)}`);
-      audio.lose();
-    }
-
-    isSpinning = false;
-    setButtonsForSpin(false);
-
-    if (autoSpin && !pendingPower && powerModalOverlay.classList.contains("hidden") && powerPlayOverlay.classList.contains("hidden")){
-      await wait(650);
-      if (autoSpin) spinBase();
-    }
-  }
-
-  // Spin Button: wenn läuft -> STOP, sonst spin
-  spinBtn.addEventListener("click", () => {
-    audio.ensure();
-    if (isSpinning){
-      baseStopToken.stop = true; // QUICK STOP
-      setMid("Stop…", "schneller fertig");
-      return;
-    }
-    spinBase();
+    if (target.dataset.upgrade) upgradeBuilding(target.dataset.upgrade);
+    if (target.dataset.recruit) recruitUnit(target.dataset.recruit);
+    if (target.dataset.run) runMission(target.dataset.run);
+    if (target.dataset.bribe) bribeFaction(target.dataset.bribe);
+    if (target.dataset.perk) improvePerk(target.dataset.perk);
   });
 
-  autoBtn.addEventListener("click", () => {
-    audio.ensure();
-    autoSpin = !autoSpin;
-    autoBtn.textContent = autoSpin ? "AUTO: AN" : "AUTO: AUS";
-    autoBtn.classList.toggle("primary", autoSpin);
-
-    if (autoSpin){
-      setMid("Auto ✅", "läuft…");
-      if (!isSpinning) spinBase();
-    } else {
-      setMid("Auto ❌", "aus");
-    }
+  $('#saveBtn').addEventListener('click', () => saveState(false));
+  $('#collectBtn').addEventListener('click', collectIncome);
+  $('#renameBtn').addEventListener('click', renameClub);
+  $('#upgradeCheapestBtn').addEventListener('click', upgradeCheapest);
+  $('#cooldownBtn').addEventListener('click', cooldownHeat);
+  $('#trainLeaderBtn').addEventListener('click', trainLeader);
+  $('#clearLogBtn').addEventListener('click', () => {
+    state.log = [];
+    renderLog();
+    saveState(true);
   });
-
-  // Bet / Slot
-  betSelect.addEventListener("change", () => {
-    state.bet = Number(betSelect.value);
-    saveState();
-    setMid("Einsatz", eur(state.bet));
-  });
-
-  slotSelect.addEventListener("change", () => {
-    state.selectedSlotId = slotSelect.value;
-    saveState();
-    fillSlotOptions();
-    renderSlotMeta();
-    rebuildBaseBoard();
-    stopAuto("Slot gewechselt");
-    setMid("Slot", getSelectedSlot().name);
-  });
-
-  /* =========================
-     Sound Toggle
-  ========================= */
-  function renderSoundBtn(){
-    soundBtn.textContent = state.soundOn ? "Sound: AN" : "Sound: AUS";
-  }
-  soundBtn.addEventListener("click", () => {
-    audio.ensure();
-    state.soundOn = !state.soundOn;
-    saveState();
-    renderSoundBtn();
-    setMid("Sound", state.soundOn ? "AN" : "AUS");
-  });
-
-  /* =========================
-     Power Spins
-  ========================= */
-  let pendingPower = null;
-
-  function openPowerBuyModal(info){
-    const costPerSpin = info.bet * 4;
-    const maxSpins = Math.max(1, Math.floor(info.baseWin / costPerSpin));
-
-    powerBuyRange.min = "1";
-    powerBuyRange.max = String(maxSpins);
-    powerBuyRange.value = String(Math.min(2, maxSpins));
-
-    powerModalText.innerHTML =
-      `Gewinn: <b>${eur(info.baseWin)}</b> (≥ 4× Einsatz).<br>
-       Power-Spins laufen auf <b>4 Feldern nacheinander</b> (sieht echter aus).<br>
-       Kosten pro Power-Spin: <b>${eur(costPerSpin)}</b> (Einsatz × 4).`;
-
-    syncPowerBuyText(info.bet);
-    powerModalOverlay.classList.remove("hidden");
-  }
-
-  function closePowerBuyModal(){ powerModalOverlay.classList.add("hidden"); }
-
-  function syncPowerBuyText(bet){
-    const spins = Number(powerBuyRange.value);
-    powerBuySpins.textContent = spins === 1 ? "1 Spin" : `${spins} Spins`;
-    powerBuyCost.textContent = eur(spins * bet * 4);
-  }
-
-  powerBuyRange.addEventListener("input", () => {
-    if (!pendingPower) return;
-    syncPowerBuyText(pendingPower.bet);
-  });
-
-  closePowerModal.addEventListener("click", () => {
-    // schließen = Gewinn behalten, kein Power
-    if (pendingPower){
-      setMid("WIN ✅", `+${eur(pendingPower.baseWin)} (kein Power)`);
-      pendingPower = null;
-    }
-    closePowerBuyModal();
-  });
-
-  takeWinBtn.addEventListener("click", () => {
-    if (!pendingPower) return;
-    setMid("WIN ✅", `+${eur(pendingPower.baseWin)} (genommen)`);
-    pendingPower = null;
-    closePowerBuyModal();
-  });
-
-  buyPowerBtn.addEventListener("click", async () => {
-    if (!pendingPower) return;
-    const spins = Number(powerBuyRange.value);
-
-    const info = pendingPower;
-    pendingPower = null;
-    closePowerBuyModal();
-
-    await startPowerPlay(info, spins);
-  });
-
-  // PowerPlay STOP Token
-  let powerStopToken = { stop: false };
-
-  powerStopBtn.addEventListener("click", () => {
-    powerStopToken.stop = true; // QUICK STOP in Power
-    setMid("Power STOP", "schneller…");
-  });
-
-  powerCloseBtn.addEventListener("click", () => {
-    // wenn user schließt, stoppen wir und lassen overlay zu
-    powerStopToken.stop = true;
-    powerPlayOverlay.classList.add("hidden");
-    setMid("Power", "geschlossen");
-  });
-
-  async function startPowerPlay(info, spinsToBuy){
-    const slot = getAllSlots()[info.slotId] || getSelectedSlot();
-    const bet = info.bet;
-
-    const cost = Math.round(spinsToBuy * bet * 4 * 100) / 100;
-    const immediate = Math.round((info.baseWin - cost) * 100) / 100;
-
-    // sofort Restguthaben aus Gewinn auszahlen
-    state.balance = Math.round((state.balance + immediate) * 100) / 100;
-    saveState();
-    renderBalance();
-
-    // overlay öffnen
-    powerPlayOverlay.classList.remove("hidden");
-    powerStopToken = { stop: false };
-
-    // Boards bauen
-    for (const pb of pBoards){
-      if (!pb._cells) buildBoard(pb, slot);
-      clearWin(pb);
-    }
-
-    let powerTotal = 0;
-    powerTotalWinEl.textContent = eur(0);
-    powerSpinWinEl.textContent = eur(0);
-
-    let spinsLeft = spinsToBuy;
-    powerSpinsLeftEl.textContent = String(spinsLeft);
-
-    // ✅ Jede Power-Runde: 4 Felder NACHEINANDER
-    while (spinsLeft > 0){
-      powerStopToken.stop = false; // pro Spin wieder “normal”, aber Stop bleibt möglich durch Button
-
-      powerSpinsLeftEl.textContent = String(spinsLeft);
-      let spinWin = 0;
-
-      for (let i=0; i<4; i++){
-        clearWin(pBoards[i]);
-
-        const raw = generateGrid(slot, "power");
-        await spinBoardAnimated(pBoards[i], slot, "power", raw, powerStopToken);
-
-        const evalGrid = applyMysteryAndWild(slot, raw, "power");
-        const res = evaluateWins(slot, evalGrid, bet);
-
-        for (const lw of res.lineWins) highlight(pBoards[i], lw.positions);
-
-        spinWin += res.totalWin;
-
-        // wenn STOP: restliche Felder sofort fertig machen
-        if (powerStopToken.stop){
-          // Direkt für restliche Boards final setzen (ohne lange Animation)
-          for (let j=i+1; j<4; j++){
-            clearWin(pBoards[j]);
-            const raw2 = generateGrid(slot, "power");
-            // sofort final setzen
-            for (let c=0; c<slot.reels; c++){
-              for (let r=0; r<slot.rows; r++){
-                setCell(pBoards[j], slot, r, c, raw2[r][c]);
-              }
-            }
-            const eval2 = applyMysteryAndWild(slot, raw2, "power");
-            const res2 = evaluateWins(slot, eval2, bet);
-            for (const lw of res2.lineWins) highlight(pBoards[j], lw.positions);
-            spinWin += res2.totalWin;
-          }
-          break;
-        }
-      }
-
-      spinWin = Math.round(spinWin * 100) / 100;
-      powerTotal = Math.round((powerTotal + spinWin) * 100) / 100;
-
-      powerSpinWinEl.textContent = eur(spinWin);
-      powerTotalWinEl.textContent = eur(powerTotal);
-
-      spinsLeft -= 1;
-      powerSpinsLeftEl.textContent = String(spinsLeft);
-
-      await wait(250);
-    }
-
-    // Auszahlen
-    state.balance = Math.round((state.balance + powerTotal) * 100) / 100;
-    saveState();
-    renderBalance();
-
-    powerPlayOverlay.classList.add("hidden");
-    setMid("Power ✅", `+${eur(powerTotal)}`);
-    audio.win();
-  }
-
-  /* =========================
-     Daily Wheel
-  ========================= */
-  const WHEEL_VALUES = [10,20,30,40,50,60,70,80,90,100];
-  function wheelReady(){ return Date.now() >= (state.lastWheelAt || 0) + DAY_MS; }
-
-  function openWheelModal(){
-    updateWheelModalText();
-    wheelModalOverlay.classList.remove("hidden");
-    stopAuto("Wheel geöffnet");
-  }
-  function closeWheelModalNow(){ wheelModalOverlay.classList.add("hidden"); }
-
-  function updateWheelModalText(){
-    const now = Date.now();
-    const next = (state.lastWheelAt || 0) + DAY_MS;
-    if (now >= next){
-      wheelReadyText.textContent = "Bereit ✅";
-      spinWheelBtn.disabled = false;
-    } else {
-      const ms = next - now;
-      const h = Math.floor(ms / (60*60*1000));
-      const m = Math.floor((ms % (60*60*1000)) / (60*1000));
-      const s = Math.floor((ms % (60*1000)) / 1000);
-      wheelReadyText.textContent = `In ${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
-      spinWheelBtn.disabled = true;
-    }
-  }
-
-  let wheelSpinning = false;
-  async function spinDailyWheel(){
-    audio.ensure();
-    if (wheelSpinning) return;
-    if (!wheelReady()){ updateWheelModalText(); return; }
-
-    wheelSpinning = true;
-    spinWheelBtn.disabled = true;
-
-    const index = randInt(0, WHEEL_VALUES.length - 1);
-    const prize = WHEEL_VALUES[index];
-
-    const segmentDeg = 360 / WHEEL_VALUES.length;
-    const targetDeg = (360 - (index * segmentDeg) - (segmentDeg / 2));
-    const extraTurns = 5 * 360;
-    const finalDeg = extraTurns + targetDeg + randInt(-6, 6);
-
-    wheel.style.transform = `rotate(${finalDeg}deg)`;
-    wheelInfo.textContent = "Dreht…";
-
-    await wait(2700);
-
-    state.balance = Math.round((state.balance + prize) * 100) / 100;
-    state.lastWheelAt = Date.now();
-    saveState();
-    renderBalance();
-
-    wheelInfo.innerHTML = `Gewonnen: <b>${eur(prize)}</b> ✅`;
-    setMid("Wheel ✅", `+${eur(prize)}`);
-    audio.win();
-
-    updateWheelCooldownUI();
-    updateWheelModalText();
-
-    wheelSpinning = false;
-    spinWheelBtn.disabled = false;
-  }
-
-  wheelBtn.addEventListener("click", openWheelModal);
-  closeWheelModal.addEventListener("click", closeWheelModalNow);
-  spinWheelBtn.addEventListener("click", spinDailyWheel);
-
-  /* =========================
-     Admin / Builder
-  ========================= */
-  const ADMIN_PASSWORD = "1403";
-
-  function exportAllData(){
-    copyToClipboard(JSON.stringify(state, null, 2));
-    alert("Save JSON kopiert.");
-  }
-  function resetAll(){
-    if (!confirm("Wirklich ALLES zurücksetzen?")) return;
-    state = { ...defaultState };
-    saveState();
-    initUI();
-    alert("Zurückgesetzt.");
-  }
-
-  async function copyToClipboard(text){
-    try { await navigator.clipboard.writeText(text); }
-    catch {
-      const ta = document.createElement("textarea");
-      ta.value = text; document.body.appendChild(ta);
-      ta.select(); document.execCommand("copy"); ta.remove();
-    }
-  }
-
-  function validateSlotConfig(cfg){
-    const errors = [];
-    const req = (cond, msg) => { if (!cond) errors.push(msg); };
-
-    req(cfg && typeof cfg === "object", "Config muss Objekt sein.");
-    if (!cfg || typeof cfg !== "object") return { ok:false, errors };
-
-    req(typeof cfg.id === "string" && cfg.id.length >= 3, "id fehlt.");
-    req(typeof cfg.name === "string" && cfg.name.length >= 2, "name fehlt.");
-    req(cfg.reels === 5, "reels muss 5 sein.");
-    req(cfg.rows === 3, "rows muss 3 sein.");
-    req(cfg.paylines === 10, "paylines muss 10 sein.");
-    req(cfg.features && typeof cfg.features === "object", "features fehlt.");
-    req(Array.isArray(cfg.symbols) && cfg.symbols.length >= 6, "symbols fehlt.");
-    req(cfg.weights && cfg.weights.base && cfg.weights.power, "weights fehlen.");
-    req(cfg.paytable && typeof cfg.paytable === "object", "paytable fehlt.");
-
-    if (cfg.symbols){
-      const keys = cfg.symbols.map(s => s.key);
-      req(new Set(keys).size === keys.length, "symbol keys müssen eindeutig sein.");
-    }
-    return { ok: errors.length === 0, errors };
-  }
-
-  function refreshBuilderJson(){
-    const all = getAllSlots();
-    const id = builderSlotSelect.value || state.selectedSlotId;
-    const cfg = all[id] || getSelectedSlot();
-    builderJson.value = JSON.stringify(cfg, null, 2);
-    builderSlotSelect.value = id;
-  }
-
-  function saveBuilderJson(){
-    let obj;
-    try { obj = JSON.parse(builderJson.value); }
-    catch (e){ alert("JSON Fehler: " + e.message); return; }
-
-    const v = validateSlotConfig(obj);
-    if (!v.ok){ alert("Ungültig:\n- " + v.errors.join("\n- ")); return; }
-
-    const isBuiltIn = (obj.id === "lucky_pharaoh");
-    const id = isBuiltIn ? (obj.id + "_custom_" + randInt(1000,9999)) : obj.id;
-    obj.id = id;
-
-    state.customSlots[id] = obj;
-    state.selectedSlotId = id;
-    saveState();
-
-    fillSlotOptions();
-    renderSlotMeta();
-    rebuildBaseBoard();
-    alert("Gespeichert: " + obj.name);
-  }
-
-  function slugify(s){
-    return String(s||"").toLowerCase().trim().replace(/[^\wäöüß]+/g,"_").replace(/_+/g,"_").replace(/^_|_$/g,"");
-  }
-  function builderNewSlot(){
-    const name = prompt("Name für neuen Slot:");
-    if (!name) return;
-    const id = slugify(name) || ("slot_" + randInt(1000,9999));
-    const base = makeLuckyPharaohSlot();
-    const cfg = structuredClone(base);
-    cfg.id = id; cfg.name = name;
-    state.customSlots[id] = cfg;
-    state.selectedSlotId = id;
-    saveState();
-    fillSlotOptions();
-    renderSlotMeta();
-    rebuildBaseBoard();
-    refreshBuilderJson();
-    alert("Erstellt: " + name);
-  }
-  function builderCloneSelected(){
-    const all = getAllSlots();
-    const srcId = builderSlotSelect.value || state.selectedSlotId;
-    const src = all[srcId];
-    if (!src) return;
-    const clone = structuredClone(src);
-    clone.id = `${src.id}_clone_${randInt(1000,9999)}`;
-    clone.name = `${src.name} (Clone)`;
-    state.customSlots[clone.id] = clone;
-    state.selectedSlotId = clone.id;
-    saveState();
-    fillSlotOptions();
-    renderSlotMeta();
-    rebuildBaseBoard();
-    refreshBuilderJson();
-    alert("Geklont.");
-  }
-  function builderDeleteSelected(){
-    const id = builderSlotSelect.value || state.selectedSlotId;
-    if (!state.customSlots[id]) return alert("Nur Custom Slots löschbar.");
-    if (!confirm("Löschen? " + id)) return;
-    delete state.customSlots[id];
-    state.selectedSlotId = "lucky_pharaoh";
-    saveState();
-    fillSlotOptions();
-    renderSlotMeta();
-    rebuildBaseBoard();
-    refreshBuilderJson();
-    alert("Gelöscht.");
-  }
-  function builderExportSlot(){
-    const all = getAllSlots();
-    const id = builderSlotSelect.value || state.selectedSlotId;
-    if (!all[id]) return;
-    copyToClipboard(JSON.stringify(all[id], null, 2));
-    alert("Slot JSON kopiert.");
-  }
-  function builderImportSlot(){
-    const str = prompt("Slot JSON einfügen:");
-    if (!str) return;
-    let obj;
-    try { obj = JSON.parse(str); }
-    catch (e){ return alert("JSON Fehler: " + e.message); }
-    const v = validateSlotConfig(obj);
-    if (!v.ok) return alert("Ungültig:\n- " + v.errors.join("\n- "));
-    const id = obj.id && obj.id !== "lucky_pharaoh" ? obj.id : ("import_" + randInt(1000,9999));
-    obj.id = id;
-    state.customSlots[id] = obj;
-    state.selectedSlotId = id;
-    saveState();
-    fillSlotOptions();
-    renderSlotMeta();
-    rebuildBaseBoard();
-    refreshBuilderJson();
-    alert("Importiert.");
-  }
-
-  closeAdmin.addEventListener("click", () => adminOverlay.classList.add("hidden"));
-  adminSetBalanceBtn.addEventListener("click", () => {
-    const v = Number(adminBalanceInput.value);
-    if (!Number.isFinite(v) || v < 0) return alert("Ungültig.");
-    state.balance = Math.round(v * 100) / 100;
-    saveState();
-    renderBalance();
-    setMid("Balance", eur(state.balance));
-  });
-  adminResetWheelBtn.addEventListener("click", () => {
-    state.lastWheelAt = 0;
-    saveState();
-    updateWheelCooldownUI();
-    updateWheelModalText();
-    setMid("Wheel", "reset");
-  });
-  adminExportDataBtn.addEventListener("click", exportAllData);
-  adminResetAllBtn.addEventListener("click", resetAll);
-
-  builderSlotSelect.addEventListener("change", refreshBuilderJson);
-  builderSaveBtn.addEventListener("click", saveBuilderJson);
-  builderNewBtn.addEventListener("click", builderNewSlot);
-  builderCloneBtn.addEventListener("click", builderCloneSelected);
-  builderDeleteBtn.addEventListener("click", builderDeleteSelected);
-  builderExportSlotBtn.addEventListener("click", builderExportSlot);
-  builderImportSlotBtn.addEventListener("click", builderImportSlot);
-
-  // Admin Hotkey
-  window.addEventListener("keydown", (e) => {
-    const ctrlAlt = e.ctrlKey && e.altKey;
-    const isHash = (e.key === "#") || (e.code === "Digit3") || (e.code === "Backslash");
-    if (ctrlAlt && isHash) {
-      e.preventDefault();
-      const pwd = prompt("Admin Passwort:");
-      if (pwd !== ADMIN_PASSWORD) return alert("Falsch.");
-      adminBalanceInput.value = String(state.balance.toFixed(2));
-      refreshBuilderJson();
-      adminOverlay.classList.remove("hidden");
-      stopAuto("Admin geöffnet");
-    }
-  });
-
-  /* =========================
-     Rebuild base board
-  ========================= */
-  function rebuildBaseBoard(){
-    const slot = getSelectedSlot();
-    buildBoard(baseBoardEl, slot);
-    const g = generateGrid(slot, "base");
-    for (let r=0; r<slot.rows; r++){
-      for (let c=0; c<slot.reels; c++){
-        setCell(baseBoardEl, slot, r, c, g[r][c]);
-      }
-    }
-  }
-
-  /* =========================
-     Init
-  ========================= */
-  function initUI(){
-    renderBalance();
-    fillBetOptions();
-    fillSlotOptions();
-    renderSlotMeta();
-    rebuildBaseBoard();
-    renderSoundBtn();
-    updateWheelCooldownUI();
-    setMid("Bereit", "Tippe SPIN");
-  }
-
-  setInterval(() => {
-    updateWheelCooldownUI();
-    if (!wheelModalOverlay.classList.contains("hidden")) updateWheelModalText();
-  }, 1000);
-
-  initUI();
-})();
+}
+
+function startGame() {
+  applyOfflineProgress();
+  bindEvents();
+  renderAll();
+  setInterval(() => tick(), TICK_MS);
+  setInterval(() => renderMissions(), 1000);
+  window.addEventListener('beforeunload', () => saveState(true));
+}
+
+startGame();
