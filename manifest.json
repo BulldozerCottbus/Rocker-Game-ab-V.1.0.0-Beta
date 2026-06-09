@@ -1,10 +1,18 @@
 {
-  "name": "Road Charter: Block Empire",
+  "name": "Road Charter Empire",
   "short_name": "Road Charter",
-  "start_url": "index.html",
+  "description": "Mobile Aufbau-Strategie-Spiel mit MC, Crew, Gebäuden, Fraktionen und Runs.",
+  "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#151111",
-  "theme_color": "#151111",
-  "description": "Mobile-first Basebuilding-Strategie-Prototyp mit Charter, Crew, Blöcken, Geldlager und Fraktionen.",
-  "icons": []
+  "background_color": "#0b0808",
+  "theme_color": "#130d0d",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "assets/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
 }
