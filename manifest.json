@@ -1,0 +1,10 @@
+{
+  "name": "Road Charter: Block Empire",
+  "short_name": "Road Charter",
+  "start_url": "index.html",
+  "display": "standalone",
+  "background_color": "#151111",
+  "theme_color": "#151111",
+  "description": "Mobile-first Basebuilding-Strategie-Prototyp mit Charter, Crew, Blöcken, Geldlager und Fraktionen.",
+  "icons": []
+}
