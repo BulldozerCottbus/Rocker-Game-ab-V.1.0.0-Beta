@@ -1,949 +1,1243 @@
 'use strict';
 
-const SAVE_KEY = 'road_charter_block_empire_v1';
-const TICK_MS = 3000;
+const SAVE_KEY = 'road_charter_empire_v2';
+const TICK_MS = 1000;
 const MAX_OFFLINE_SECONDS = 60 * 60 * 4;
+const BUILDING_MAX = 20;
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+const now = () => Date.now();
 
 const fmtMoney = (value) => `${Math.floor(value).toLocaleString('de-DE')} $`;
 const fmtNum = (value) => Math.floor(value).toLocaleString('de-DE');
-const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+const percent = (value) => `${Math.round(value)}%`;
+const minute = () => new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
 
-const BUILDING_BLUEPRINTS = [
+const EMBLEMS = {
+  wolf: '🐺',
+  skull: '☠️',
+  eagle: '🦅',
+  wheel: '⚙️',
+  flame: '🔥'
+};
+
+const SELECT_OPTIONS = {
+  emblem: [
+    ['wolf', 'Wolf'],
+    ['skull', 'Skull'],
+    ['eagle', 'Adler'],
+    ['wheel', 'Rad'],
+    ['flame', 'Flamme']
+  ],
+  vest: [
+    ['black', 'Schwarz'],
+    ['charcoal', 'Dunkelgrau'],
+    ['brown', 'Lederbraun'],
+    ['blue', 'Nachtblau']
+  ],
+  trim: [
+    ['red', 'Rot'],
+    ['gold', 'Gold'],
+    ['steel', 'Stahl'],
+    ['green', 'Grün'],
+    ['blue', 'Blau']
+  ]
+};
+
+const BUILDINGS = [
   {
     id: 'clubhouse',
     icon: '🏚️',
     name: 'Clubhouse',
-    desc: 'Zentrale des Charters. Erhöht Crew-Limit, Respekt-Gewinn und schaltet stärkere Upgrades frei.',
-    baseCost: 250,
-    costGrowth: 1.85,
+    type: 'core',
+    desc: 'Herzstück deines Charters. Erhöht Crew-Limit, Einfluss und Respekt.',
+    baseCost: 900,
+    growth: 1.52,
     respectCost: 0,
-    maxLevel: 20,
-    effects: { crewCap: 4, respectPerTick: 1, defense: 2 }
+    unlock: 0,
+    baseIncome: 18,
+    effects: { crewCap: 4, respect: 1.2, influence: 3 }
   },
   {
-    id: 'cashvault',
+    id: 'moneyvault',
     icon: '💰',
     name: 'Geldlager',
-    desc: 'Mehr Lagerplatz für Einnahmen. Ohne Lager-Ausbau geht dir später viel Geld verloren.',
-    baseCost: 180,
-    costGrowth: 1.75,
+    type: 'core',
+    desc: 'Bestimmt, wie viel Cash du maximal lagern kannst. Ohne Ausbau läuft dein Gewinn über.',
+    baseCost: 760,
+    growth: 1.48,
     respectCost: 0,
-    maxLevel: 25,
-    effects: { storage: 1600, defense: 1 }
+    unlock: 0,
+    baseIncome: 0,
+    effects: { storage: 8500, defense: 1 }
   },
   {
     id: 'garage',
     icon: '🔧',
     name: 'Bike-Werkstatt',
-    desc: 'Verbessert Bike-Power, Runs und Verteidigung. Vom Gefühl her wie ein CoC-Labor.',
-    baseCost: 340,
-    costGrowth: 1.9,
-    respectCost: 4,
-    maxLevel: 20,
+    type: 'core',
+    desc: 'Verbessert Bike-Power und schaltet stärkere Runs frei.',
+    baseCost: 1100,
+    growth: 1.55,
+    respectCost: 5,
+    unlock: 0,
+    baseIncome: 8,
     effects: { power: 5, defense: 2 }
   },
   {
     id: 'nomadcamp',
     icon: '⛺',
     name: 'Nomad Camp',
-    desc: 'Hier kommen neue Fahrer dazu. Gibt Crew-Kapazität und kleine passive Einnahmen.',
-    baseCost: 460,
-    costGrowth: 1.8,
+    type: 'core',
+    desc: 'Bringt neue Fahrer und erhöht dein Crew-Limit deutlich.',
+    baseCost: 1280,
+    growth: 1.54,
     respectCost: 8,
-    maxLevel: 20,
-    effects: { crewCap: 6, income: 5 }
+    unlock: 0,
+    baseIncome: 14,
+    effects: { crewCap: 6, power: 2 }
   },
   {
-    id: 'bar',
+    id: 'roadbar',
     icon: '🍻',
     name: 'Road Bar',
-    desc: 'Legal getarnter Treffpunkt. Bringt stabile Einnahmen und Respekt in der Gegend.',
-    baseCost: 520,
-    costGrowth: 1.72,
+    type: 'income',
+    desc: 'Dein erster stabiler Geldbringer mit wenig Risiko.',
+    baseCost: 1350,
+    growth: 1.50,
     respectCost: 6,
-    maxLevel: 20,
-    effects: { income: 16, respectPerTick: 1 }
+    unlock: 1,
+    baseIncome: 42,
+    effects: { respect: .7, influence: 2 }
   },
   {
-    id: 'eastblock',
-    icon: '🏙️',
-    name: 'East Block',
-    desc: 'Erster Stadtblock. Je höher der Block, desto mehr Cash, aber etwas mehr Heat.',
-    baseCost: 750,
-    costGrowth: 1.82,
-    respectCost: 12,
-    maxLevel: 20,
-    effects: { income: 28, heat: 0.18, control: 3 }
+    id: 'tattoo',
+    icon: '🖋️',
+    name: 'Tattoo Shop',
+    type: 'income',
+    desc: 'Gibt Geld und Respekt in der Szene.',
+    baseCost: 1650,
+    growth: 1.51,
+    respectCost: 10,
+    unlock: 2,
+    baseIncome: 58,
+    effects: { respect: 1.1, influence: 2 }
   },
   {
-    id: 'harbor',
-    icon: '⚓',
-    name: 'Harbor Block',
-    desc: 'Hafenviertel mit starken Einnahmen. Braucht Crew und verursacht höheren Stadt-Druck.',
-    baseCost: 1100,
-    costGrowth: 1.86,
-    respectCost: 18,
-    maxLevel: 20,
-    effects: { income: 42, heat: 0.28, control: 5 }
-  },
-  {
-    id: 'industrial',
-    icon: '🏭',
-    name: 'Industrial Block',
-    desc: 'Industriegebiet. Teuer, aber stark für Einkommen, Lager und Verteidigung.',
-    baseCost: 1550,
-    costGrowth: 1.88,
-    respectCost: 25,
-    maxLevel: 20,
-    effects: { income: 55, storage: 500, defense: 4, heat: 0.22 }
+    id: 'chopshop',
+    icon: '🏍️',
+    name: 'Custom Shop',
+    type: 'income',
+    desc: 'Motorrad-Umbauten bringen Geld und Bike-Bonus.',
+    baseCost: 2150,
+    growth: 1.53,
+    respectCost: 14,
+    unlock: 3,
+    baseIncome: 74,
+    effects: { power: 3, heat: .08 }
   },
   {
     id: 'lookout',
     icon: '👁️',
     name: 'Lookout Posten',
-    desc: 'Senkt Risiko bei Runs und bremst Heat-Zuwachs durch bessere Übersicht.',
-    baseCost: 900,
-    costGrowth: 1.78,
-    respectCost: 16,
-    maxLevel: 20,
-    effects: { defense: 5, heatReduce: 0.14 }
+    type: 'defense',
+    desc: 'Senkt Risiko, bremst Heat und schützt deine Einnahmen.',
+    baseCost: 1900,
+    growth: 1.50,
+    respectCost: 12,
+    unlock: 3,
+    baseIncome: 4,
+    effects: { defense: 5, heatReduce: .18 }
+  },
+  {
+    id: 'eastblock',
+    icon: '🏙️',
+    name: 'East Block',
+    type: 'block',
+    desc: 'Erster Stadtblock. Gute Einnahmen, etwas mehr Druck.',
+    baseCost: 2600,
+    growth: 1.55,
+    respectCost: 18,
+    unlock: 4,
+    baseIncome: 96,
+    effects: { control: 4, heat: .16 }
+  },
+  {
+    id: 'southblock',
+    icon: '🏚️',
+    name: 'South Block',
+    type: 'block',
+    desc: 'Günstiger Block mit starker Skalierung.',
+    baseCost: 3100,
+    growth: 1.56,
+    respectCost: 22,
+    unlock: 5,
+    baseIncome: 118,
+    effects: { control: 5, heat: .18 }
+  },
+  {
+    id: 'industrial',
+    icon: '🏭',
+    name: 'Industrial Block',
+    type: 'block',
+    desc: 'Teuer, aber stark für Cash und Lager.',
+    baseCost: 4300,
+    growth: 1.58,
+    respectCost: 32,
+    unlock: 6,
+    baseIncome: 166,
+    effects: { storage: 1200, control: 7, heat: .22 }
+  },
+  {
+    id: 'harbor',
+    icon: '⚓',
+    name: 'Harbor Block',
+    type: 'block',
+    desc: 'Hafenviertel mit sehr starken Einnahmen und mehr Druck.',
+    baseCost: 5600,
+    growth: 1.60,
+    respectCost: 44,
+    unlock: 7,
+    baseIncome: 224,
+    effects: { control: 9, heat: .27 }
+  },
+  {
+    id: 'downtown',
+    icon: '🌆',
+    name: 'Downtown Block',
+    type: 'block',
+    desc: 'Zentrum der Stadt. Viel Gewinn, viel Aufmerksamkeit.',
+    baseCost: 7600,
+    growth: 1.61,
+    respectCost: 62,
+    unlock: 9,
+    baseIncome: 312,
+    effects: { control: 12, heat: .32 }
+  },
+  {
+    id: 'safehouse',
+    icon: '🧱',
+    name: 'Safehouse',
+    type: 'defense',
+    desc: 'Stärkt Verteidigung, Lager und senkt Verlust bei Fehlschlägen.',
+    baseCost: 5000,
+    growth: 1.57,
+    respectCost: 38,
+    unlock: 8,
+    baseIncome: 24,
+    effects: { storage: 2500, defense: 7, heatReduce: .08 }
   }
 ];
 
-const UNIT_BLUEPRINTS = [
+const UNITS = [
   {
     id: 'hangaround',
     icon: '🧢',
     name: 'Hangaround',
-    desc: 'Günstiger Einstieg. Hilft beim Geldfluss, ist aber schwach in Runs.',
-    baseCash: 160,
-    baseRespect: 0,
-    power: 2,
-    income: 2,
-    capUse: 1
+    desc: 'Billig, schnell, wenig Power. Gut für den Anfang.',
+    baseCost: 420,
+    growth: 1.22,
+    respectCost: 0,
+    power: 3,
+    upkeep: 2
   },
   {
     id: 'prospect',
     icon: '🦺',
     name: 'Prospect',
-    desc: 'Solider Aufbau-Fahrer. Bringt mehr Power und etwas passives Einkommen.',
-    baseCash: 420,
-    baseRespect: 6,
-    power: 6,
-    income: 4,
-    capUse: 1
+    desc: 'Stärker und zuverlässig für kleine Runs.',
+    baseCost: 1100,
+    growth: 1.24,
+    respectCost: 7,
+    power: 9,
+    upkeep: 5
   },
   {
     id: 'member',
-    icon: '🛡️',
+    icon: '🧥',
     name: 'Member',
-    desc: 'Starkes Rückgrat für Charter-Kontrolle und erfolgreiche Runs.',
-    baseCash: 950,
-    baseRespect: 15,
-    power: 16,
-    income: 8,
-    capUse: 2
+    desc: 'Solide Haupt-Crew mit gutem Power-Wert.',
+    baseCost: 2900,
+    growth: 1.26,
+    respectCost: 20,
+    power: 24,
+    upkeep: 12
   },
   {
     id: 'roadcaptain',
-    icon: '🏍️',
+    icon: '🧭',
     name: 'Road Captain',
-    desc: 'Verbessert Missionen deutlich und erhöht Kontrolle in allen Blöcken.',
-    baseCash: 2200,
-    baseRespect: 35,
-    power: 38,
-    income: 15,
-    capUse: 3
+    desc: 'Erhöht Erfolgschance und Run-Belohnungen.',
+    baseCost: 7800,
+    growth: 1.30,
+    respectCost: 65,
+    power: 62,
+    upkeep: 28
   },
   {
     id: 'nomad',
-    icon: '🔥',
+    icon: '🏍️',
     name: 'Nomad',
-    desc: 'Teuer, aber extrem stark. Ideal für schwierige Runs und Block-Kontrolle.',
-    baseCash: 5200,
-    baseRespect: 80,
-    power: 95,
-    income: 35,
-    capUse: 5
+    desc: 'Sehr stark, teuer, perfekt für schwere Runs.',
+    baseCost: 16500,
+    growth: 1.33,
+    respectCost: 140,
+    power: 150,
+    upkeep: 72
   }
 ];
 
-const MISSION_BLUEPRINTS = [
+const RUNS = [
   {
-    id: 'neighborhood',
-    icon: '🧭',
-    name: 'Neighborhood Run',
-    desc: 'Kleiner Stadtlauf. Gut für den Start und wenig Risiko.',
-    requiredPower: 8,
-    cash: 360,
-    respect: 7,
+    id: 'barmeet',
+    icon: '🍻',
+    name: 'Road Bar Treffen',
+    desc: 'Kleiner Run für Cash und Respekt.',
+    power: 12,
+    reward: 1200,
+    respect: 8,
     heat: 3,
     cooldown: 20
   },
   {
-    id: 'blockdeal',
-    icon: '📦',
-    name: 'Block-Deal',
-    desc: 'Mittlere Operation mit besserer Beute, aber spürbar mehr Aufmerksamkeit.',
-    requiredPower: 36,
-    cash: 1300,
-    respect: 22,
-    heat: 7,
-    cooldown: 35
+    id: 'partsrun',
+    icon: '🔧',
+    name: 'Bike-Parts Run',
+    desc: 'Beschaffe Teile für Custom Bikes.',
+    power: 36,
+    reward: 3600,
+    respect: 18,
+    heat: 6,
+    cooldown: 40
   },
   {
-    id: 'rivalpush',
-    icon: '🐺',
-    name: 'Rivalen zurückdrängen',
-    desc: 'Taktischer PvE-Kampf gegen eine fiktive Stadtfraktion.',
-    requiredPower: 85,
-    cash: 3100,
-    respect: 55,
-    heat: 12,
-    cooldown: 55
+    id: 'blockpush',
+    icon: '🏙️',
+    name: 'Block-Kontrolle',
+    desc: 'Erhöhe Einfluss im Viertel. Braucht starke Crew.',
+    power: 90,
+    reward: 9200,
+    respect: 42,
+    heat: 11,
+    cooldown: 70
   },
   {
-    id: 'statewide',
+    id: 'state',
     icon: '🛣️',
-    name: 'Statewide Ride',
-    desc: 'Großer Run für fortgeschrittene Charters. Hohe Gewinne, hohes Risiko.',
-    requiredPower: 180,
-    cash: 8500,
-    respect: 145,
-    heat: 20,
-    cooldown: 85
+    name: 'State Run',
+    desc: 'Großer Ausritt mit Risiko und hoher Belohnung.',
+    power: 190,
+    reward: 23000,
+    respect: 95,
+    heat: 18,
+    cooldown: 120
+  },
+  {
+    id: 'chapterwar',
+    icon: '⚔️',
+    name: 'Rivalen-Challenge',
+    desc: 'Taktische PvE-Herausforderung gegen eine Rivalen-Fraktion.',
+    power: 380,
+    reward: 54000,
+    respect: 210,
+    heat: 25,
+    cooldown: 180
   }
 ];
 
-const FACTION_BLUEPRINTS = [
+const FACTIONS = [
   {
     id: 'police',
     icon: '🚓',
     name: 'City Police',
-    desc: 'Lokaler Druck. Steigt durch hohe Heat-Werte und unruhige Blocks.',
-    baseCost: 500,
-    heatDrop: 12
+    desc: 'Lokaler Druck durch Streifen und Kontrollen.',
+    baseCost: 850,
+    heatImpact: .35
   },
   {
     id: 'atf',
     icon: '🕵️',
     name: 'ATF Taskforce',
-    desc: 'Wird relevant, sobald dein Charter größer wird. Teurer zu beruhigen.',
-    baseCost: 1450,
-    heatDrop: 18
+    desc: 'Steigt, wenn du viele Blocks und Runs spielst.',
+    baseCost: 2600,
+    heatImpact: .55
   },
   {
     id: 'fbi',
     icon: '🏛️',
-    name: 'Federal Bureau',
-    desc: 'Späte Spielphase. Hoher Druck bedeutet mehr Kosten und Risk-Events.',
-    baseCost: 4200,
-    heatDrop: 26
+    name: 'FBI Bureau',
+    desc: 'Langsamer, aber gefährlicher Druck auf große Charter.',
+    baseCost: 5200,
+    heatImpact: .75
   },
   {
     id: 'rivals',
-    icon: '🐍',
-    name: 'Snake County Crew',
-    desc: 'Fiktive Rivalenfraktion. Beruhigen senkt Heat und Rivalen-Störungen.',
-    baseCost: 2400,
-    heatDrop: 20
+    icon: '🦂',
+    name: 'Rivalen-MC',
+    desc: 'Andere Fraktionen wollen deine Blöcke übernehmen.',
+    baseCost: 1700,
+    heatImpact: .42
+  },
+  {
+    id: 'cityhall',
+    icon: '🏢',
+    name: 'City Hall',
+    desc: 'Politischer Druck auf deine legal getarnten Betriebe.',
+    baseCost: 1450,
+    heatImpact: .25
   }
 ];
 
 const PERKS = [
-  {
-    id: 'leadership',
-    icon: '👑',
-    name: 'Leadership',
-    desc: 'Mehr Crew-Kapazität und bessere Missionserfolge.',
-    max: 10,
-    cash: 800,
-    respect: 20
-  },
-  {
-    id: 'mechanic',
-    icon: '🛠️',
-    name: 'Mechanic',
-    desc: 'Mehr Power aus Bike-Werkstatt und Nomads.',
-    max: 10,
-    cash: 950,
-    respect: 24
-  },
-  {
-    id: 'streetwise',
-    icon: '🃏',
-    name: 'Streetwise',
-    desc: 'Senkt Heat-Risiko bei Missionen und Upgrades.',
-    max: 10,
-    cash: 1200,
-    respect: 30
-  },
-  {
-    id: 'logistics',
-    icon: '📊',
-    name: 'Logistics',
-    desc: 'Mehr Lagerplatz und höhere passive Einnahmen.',
-    max: 10,
-    cash: 1100,
-    respect: 28
-  }
+  { id: 'negotiation', icon: '🤝', name: 'Verhandlung', desc: 'Fraktionskosten -5% pro Level.', baseCost: 2000, respectCost: 22, max: 10 },
+  { id: 'engine', icon: '🏍️', name: 'Bike Build', desc: 'Crew-Power +3% pro Level.', baseCost: 2600, respectCost: 30, max: 10 },
+  { id: 'stash', icon: '💼', name: 'Stash Planung', desc: 'Geldlager +4% pro Level.', baseCost: 2200, respectCost: 26, max: 10 },
+  { id: 'streetwise', icon: '🧠', name: 'Streetwise', desc: 'Heat-Zuwachs -3% pro Level.', baseCost: 3000, respectCost: 36, max: 10 }
 ];
 
-const defaultState = () => ({
-  version: 1,
-  name: 'Iron Wolves Charter',
-  leaderName: 'Road Captain',
-  cash: 950,
-  respect: 20,
-  heat: 6,
-  level: 1,
-  xp: 0,
-  lastTick: Date.now(),
-  buildings: Object.fromEntries(BUILDING_BLUEPRINTS.map((b, i) => [b.id, { level: i < 3 ? 1 : 0 }])),
-  units: Object.fromEntries(UNIT_BLUEPRINTS.map((u) => [u.id, { count: 0 }])),
-  factions: Object.fromEntries(FACTION_BLUEPRINTS.map((f) => [f.id, { pressure: f.id === 'police' ? 15 : 5, lastBribe: 0 }])),
-  perks: Object.fromEntries(PERKS.map((p) => [p.id, { level: 0 }])),
-  missions: {},
-  log: [
-    { time: Date.now(), text: 'Charter gegründet. Baue dein Clubhouse, Lager und deine Crew auf.' }
-  ]
-});
+let state = makeDefaultState();
+let lastRender = 0;
+let toastTimer = null;
 
-let state = loadState();
-let derived = getDerived();
+function makeDefaultState() {
+  const buildings = {};
+  const bank = {};
+  for (const building of BUILDINGS) {
+    buildings[building.id] = building.unlock === 0 ? 1 : 0;
+    bank[building.id] = 0;
+  }
 
-function loadState() {
+  const units = {};
+  for (const unit of UNITS) units[unit.id] = 0;
+
+  const factions = {};
+  for (const faction of FACTIONS) factions[faction.id] = 10;
+
+  const perks = {};
+  for (const perk of PERKS) perks[perk.id] = 0;
+
+  const cooldowns = {};
+  for (const run of RUNS) cooldowns[run.id] = 0;
+
+  return {
+    version: 2,
+    setupDone: false,
+    clubName: 'Iron Wolves MC',
+    leaderName: 'Road Captain',
+    rank: 'President',
+    patchText: 'WOLVES',
+    emblem: 'wolf',
+    vest: 'black',
+    trim: 'red',
+    cash: 6200,
+    respect: 35,
+    heat: 8,
+    leaderLevel: 1,
+    influence: 0,
+    buildings,
+    bank,
+    units,
+    factions,
+    perks,
+    cooldowns,
+    log: [{ time: minute(), text: 'Willkommen. Gründe deinen MC und baue die ersten Gebäude aus.' }],
+    lastTick: now()
+  };
+}
+
+function load() {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) return defaultState();
-    const saved = JSON.parse(raw);
-    const fresh = defaultState();
-    return {
-      ...fresh,
-      ...saved,
-      buildings: { ...fresh.buildings, ...(saved.buildings || {}) },
-      units: { ...fresh.units, ...(saved.units || {}) },
-      factions: { ...fresh.factions, ...(saved.factions || {}) },
-      perks: { ...fresh.perks, ...(saved.perks || {}) },
-      missions: saved.missions || {},
-      log: Array.isArray(saved.log) ? saved.log.slice(0, 30) : fresh.log
-    };
+    if (!raw) return makeDefaultState();
+    const loaded = JSON.parse(raw);
+    return migrateState(loaded);
   } catch (error) {
-    console.warn('Savegame konnte nicht geladen werden:', error);
-    return defaultState();
+    console.warn('Save konnte nicht geladen werden:', error);
+    return makeDefaultState();
   }
 }
 
-function saveState(silent = false) {
-  state.lastTick = Date.now();
+function migrateState(loaded) {
+  const fresh = makeDefaultState();
+  const merged = { ...fresh, ...loaded };
+  merged.buildings = { ...fresh.buildings, ...(loaded.buildings || {}) };
+  merged.bank = { ...fresh.bank, ...(loaded.bank || {}) };
+  merged.units = { ...fresh.units, ...(loaded.units || {}) };
+  merged.factions = { ...fresh.factions, ...(loaded.factions || {}) };
+  merged.perks = { ...fresh.perks, ...(loaded.perks || {}) };
+  merged.cooldowns = { ...fresh.cooldowns, ...(loaded.cooldowns || {}) };
+  merged.log = Array.isArray(loaded.log) ? loaded.log.slice(0, 40) : fresh.log;
+  merged.cash = Number.isFinite(loaded.cash) ? loaded.cash : fresh.cash;
+  merged.respect = Number.isFinite(loaded.respect) ? loaded.respect : fresh.respect;
+  merged.heat = Number.isFinite(loaded.heat) ? loaded.heat : fresh.heat;
+  merged.lastTick = Number.isFinite(loaded.lastTick) ? loaded.lastTick : now();
+  return merged;
+}
+
+function save(silent = false) {
+  state.lastTick = now();
   localStorage.setItem(SAVE_KEY, JSON.stringify(state));
-  if (!silent) addLog('Spielstand gespeichert.');
+  if (!silent) toast('Gespeichert.');
 }
 
-function getBuilding(id) {
-  return BUILDING_BLUEPRINTS.find((building) => building.id === id);
+function resetSave() {
+  localStorage.removeItem(SAVE_KEY);
+  state = makeDefaultState();
+  renderAll(true);
 }
 
-function getUnit(id) {
-  return UNIT_BLUEPRINTS.find((unit) => unit.id === id);
+function getLevel(id) {
+  return clamp(Number(state.buildings[id] || 0), 0, BUILDING_MAX);
 }
 
-function getPerk(id) {
-  return PERKS.find((perk) => perk.id === id);
+function effectLevel(level) {
+  if (level <= 0) return 0;
+  return level * (1 + level * 0.075);
 }
 
-function buildingCost(blueprint, level = state.buildings[blueprint.id].level) {
-  const next = level + 1;
-  return {
-    cash: Math.floor(blueprint.baseCost * Math.pow(blueprint.costGrowth, level)),
-    respect: Math.floor((blueprint.respectCost || 0) * Math.pow(1.38, Math.max(0, level - 1))),
-    next
-  };
+function buildingIncome(building, level = getLevel(building.id)) {
+  if (level <= 0) return 0;
+  const perkBoost = 1 + (state.perks.stash || 0) * 0.005;
+  return building.baseIncome * effectLevel(level) * perkBoost;
 }
 
-function unitCost(unit) {
-  const count = state.units[unit.id].count;
-  return {
-    cash: Math.floor(unit.baseCash * Math.pow(1.18, count)),
-    respect: Math.floor(unit.baseRespect * Math.pow(1.12, count))
-  };
+function buildingStorage(building, level = getLevel(building.id)) {
+  const income = buildingIncome(building, level);
+  return Math.max(income * 45, 300 + level * 110);
 }
 
-function perkCost(perk) {
-  const level = state.perks[perk.id].level;
-  return {
-    cash: Math.floor(perk.cash * Math.pow(1.72, level)),
-    respect: Math.floor(perk.respect * Math.pow(1.55, level))
-  };
+function upgradeCost(building, nextLevel = getLevel(building.id) + 1) {
+  const modifier = nextLevel <= 1 ? .7 : 1;
+  return Math.floor(building.baseCost * Math.pow(building.growth, Math.max(0, nextLevel - 1)) * modifier);
 }
 
-function getDerived() {
-  const d = {
-    incomePerTick: 0,
-    respectPerTick: 0,
-    heatPerTick: 0,
-    heatReduce: 0,
-    storage: 1800,
-    crewCap: 5,
-    crewUsed: 0,
-    crewCount: 0,
-    power: 0,
-    defense: 0,
-    control: 0
-  };
+function upgradeRespectCost(building, nextLevel = getLevel(building.id) + 1) {
+  return Math.floor((building.respectCost || 0) * Math.pow(1.18, Math.max(0, nextLevel - 1)));
+}
 
-  for (const blueprint of BUILDING_BLUEPRINTS) {
-    const level = state.buildings[blueprint.id]?.level || 0;
+function getTotalIncomePerMinute() {
+  return BUILDINGS.reduce((sum, building) => sum + buildingIncome(building), 0);
+}
+
+function getStoredIncome() {
+  return Object.values(state.bank).reduce((sum, value) => sum + (Number(value) || 0), 0);
+}
+
+function getRespectPerMinute() {
+  return BUILDINGS.reduce((sum, building) => {
+    const level = getLevel(building.id);
+    const base = building.effects.respect || 0;
+    return sum + base * effectLevel(level);
+  }, 0);
+}
+
+function getCrewCount() {
+  return UNITS.reduce((sum, unit) => sum + (state.units[unit.id] || 0), 0);
+}
+
+function getCrewCap() {
+  let cap = 6;
+  for (const building of BUILDINGS) {
+    const level = getLevel(building.id);
+    cap += (building.effects.crewCap || 0) * level;
+  }
+  return Math.floor(cap);
+}
+
+function getCrewPower() {
+  const basePower = UNITS.reduce((sum, unit) => sum + (state.units[unit.id] || 0) * unit.power, 0);
+  const buildingPower = BUILDINGS.reduce((sum, building) => sum + (building.effects.power || 0) * effectLevel(getLevel(building.id)), 0);
+  const leaderPower = state.leaderLevel * 8;
+  const perkBoost = 1 + (state.perks.engine || 0) * 0.03;
+  return Math.floor((basePower + buildingPower + leaderPower) * perkBoost);
+}
+
+function getDefense() {
+  return BUILDINGS.reduce((sum, building) => sum + (building.effects.defense || 0) * effectLevel(getLevel(building.id)), 0);
+}
+
+function getStorageCap() {
+  let cap = 4500;
+  for (const building of BUILDINGS) {
+    const level = getLevel(building.id);
+    cap += (building.effects.storage || 0) * effectLevel(level);
+  }
+  cap *= 1 + (state.perks.stash || 0) * 0.04;
+  return Math.floor(cap);
+}
+
+function getInfluence() {
+  let influence = state.influence || 0;
+  for (const building of BUILDINGS) {
+    const level = getLevel(building.id);
+    influence += (building.effects.influence || 0) * effectLevel(level);
+    influence += (building.effects.control || 0) * effectLevel(level);
+  }
+  return Math.floor(influence);
+}
+
+function getPressure() {
+  const factionPressure = Object.values(state.factions).reduce((sum, value) => sum + value, 0) / FACTIONS.length;
+  return clamp((state.heat * .62) + (factionPressure * .38), 0, 100);
+}
+
+function getHeatGrowthPerMinute() {
+  const raw = BUILDINGS.reduce((sum, building) => sum + (building.effects.heat || 0) * effectLevel(getLevel(building.id)), 0);
+  const reduceFromBuildings = BUILDINGS.reduce((sum, building) => sum + (building.effects.heatReduce || 0) * effectLevel(getLevel(building.id)), 0);
+  const perkReduction = 1 - (state.perks.streetwise || 0) * 0.03;
+  return Math.max(0, (raw - reduceFromBuildings) * Math.max(.4, perkReduction));
+}
+
+function tick() {
+  const current = now();
+  let elapsed = (current - state.lastTick) / 1000;
+  if (!Number.isFinite(elapsed) || elapsed < 0) elapsed = 0;
+  elapsed = Math.min(elapsed, MAX_OFFLINE_SECONDS);
+  if (elapsed < .2) return;
+
+  const minutes = elapsed / 60;
+  const cashCap = getStorageCap();
+
+  for (const building of BUILDINGS) {
+    const level = getLevel(building.id);
     if (level <= 0) continue;
-    const effects = blueprint.effects || {};
-    d.incomePerTick += (effects.income || 0) * level;
-    d.respectPerTick += (effects.respectPerTick || 0) * level;
-    d.heatPerTick += (effects.heat || 0) * level;
-    d.heatReduce += (effects.heatReduce || 0) * level;
-    d.storage += (effects.storage || 0) * level;
-    d.crewCap += (effects.crewCap || 0) * level;
-    d.power += (effects.power || 0) * level;
-    d.defense += (effects.defense || 0) * level;
-    d.control += (effects.control || 0) * level;
+    const income = buildingIncome(building, level) * minutes;
+    const cap = buildingStorage(building, level);
+    state.bank[building.id] = clamp((state.bank[building.id] || 0) + income, 0, cap);
   }
 
-  for (const unit of UNIT_BLUEPRINTS) {
-    const count = state.units[unit.id]?.count || 0;
-    d.crewCount += count;
-    d.crewUsed += unit.capUse * count;
-    d.power += unit.power * count;
-    d.incomePerTick += unit.income * count;
+  const respectGain = getRespectPerMinute() * minutes;
+  state.respect += respectGain;
+
+  const heatGrowth = getHeatGrowthPerMinute() * minutes;
+  state.heat = clamp(state.heat + heatGrowth, 0, 100);
+
+  for (const run of RUNS) {
+    state.cooldowns[run.id] = Math.max(0, (state.cooldowns[run.id] || 0) - elapsed);
   }
 
-  const leadership = state.perks.leadership.level;
-  const mechanic = state.perks.mechanic.level;
-  const streetwise = state.perks.streetwise.level;
-  const logistics = state.perks.logistics.level;
-
-  d.crewCap += leadership * 3;
-  d.power += mechanic * 12;
-  d.storage += logistics * 900;
-  d.incomePerTick *= 1 + logistics * 0.04;
-  d.heatReduce += streetwise * 0.08;
-  d.missionBonus = leadership * 2.4 + mechanic * 1.8 + d.defense * 0.15;
-  d.heatPerTick = Math.max(0, d.heatPerTick - d.heatReduce);
-
-  return d;
+  state.cash = clamp(state.cash, 0, cashCap);
+  state.lastTick = current;
 }
 
-function canPay(cost) {
-  return state.cash >= cost.cash && state.respect >= cost.respect;
+function canUnlock(building) {
+  if (building.unlock <= 0) return true;
+  const clubhouseLevel = getLevel('clubhouse');
+  return clubhouseLevel >= building.unlock;
 }
 
-function pay(cost) {
-  state.cash -= cost.cash || 0;
-  state.respect -= cost.respect || 0;
+function upgradeBuilding(id) {
+  const building = BUILDINGS.find((entry) => entry.id === id);
+  if (!building) return;
+  const level = getLevel(id);
+  if (level >= BUILDING_MAX) return toast(`${building.name} ist bereits Level ${BUILDING_MAX}.`);
+  if (!canUnlock(building)) return toast(`${building.name} braucht Clubhouse Level ${building.unlock}.`);
+
+  const nextLevel = level + 1;
+  const cost = upgradeCost(building, nextLevel);
+  const respectCost = upgradeRespectCost(building, nextLevel);
+  if (state.cash < cost) return toast(`Nicht genug Cash. Du brauchst ${fmtMoney(cost)}.`);
+  if (state.respect < respectCost) return toast(`Nicht genug Respekt. Du brauchst ${fmtNum(respectCost)}.`);
+
+  state.cash -= cost;
+  state.respect -= respectCost;
+  state.buildings[id] = nextLevel;
+  addLog(`${building.name} auf Level ${nextLevel}/${BUILDING_MAX} ausgebaut.`);
+  save(true);
+  renderAll();
+}
+
+function collectBuilding(id) {
+  const building = BUILDINGS.find((entry) => entry.id === id);
+  if (!building) return;
+  const amount = state.bank[id] || 0;
+  if (amount <= 0) return toast('Hier ist noch nichts bereit.');
+  const cap = getStorageCap();
+  const free = Math.max(0, cap - state.cash);
+  if (free <= 0) return toast('Geldlager voll. Baue dein Geldlager aus.');
+  const collected = Math.min(amount, free);
+  state.bank[id] -= collected;
+  state.cash += collected;
+  addLog(`${fmtMoney(collected)} von ${building.name} eingesammelt.`);
+  save(true);
+  renderAll();
+}
+
+function collectAll() {
+  const cap = getStorageCap();
+  let free = Math.max(0, cap - state.cash);
+  if (free <= 0) return toast('Geldlager voll. Baue dein Geldlager aus.');
+
+  let collected = 0;
+  for (const building of BUILDINGS) {
+    const amount = state.bank[building.id] || 0;
+    if (amount <= 0 || free <= 0) continue;
+    const take = Math.min(amount, free);
+    state.bank[building.id] -= take;
+    state.cash += take;
+    free -= take;
+    collected += take;
+  }
+
+  if (collected <= 0) return toast('Noch keine Einnahmen bereit.');
+  addLog(`${fmtMoney(collected)} Gesamteinnahmen eingesammelt.`);
+  save(true);
+  renderAll();
+}
+
+function upgradeBest() {
+  const candidates = BUILDINGS
+    .filter((building) => canUnlock(building) && getLevel(building.id) < BUILDING_MAX)
+    .map((building) => {
+      const next = getLevel(building.id) + 1;
+      const cost = upgradeCost(building, next);
+      const incomeGain = buildingIncome(building, next) - buildingIncome(building, next - 1);
+      return { building, cost, respectCost: upgradeRespectCost(building, next), score: incomeGain / Math.max(1, cost) };
+    })
+    .filter((item) => state.cash >= item.cost && state.respect >= item.respectCost)
+    .sort((a, b) => b.score - a.score);
+
+  if (!candidates.length) return toast('Kein bezahlbares Upgrade gefunden.');
+  upgradeBuilding(candidates[0].building.id);
+}
+
+function recruit(id) {
+  const unit = UNITS.find((entry) => entry.id === id);
+  if (!unit) return;
+  const count = state.units[id] || 0;
+  if (getCrewCount() >= getCrewCap()) return toast('Crew-Limit erreicht. Baue Clubhouse oder Nomad Camp aus.');
+  const cost = Math.floor(unit.baseCost * Math.pow(unit.growth, count));
+  const respectCost = Math.floor(unit.respectCost * Math.pow(1.13, count));
+  if (state.cash < cost) return toast(`Nicht genug Cash. Du brauchst ${fmtMoney(cost)}.`);
+  if (state.respect < respectCost) return toast(`Nicht genug Respekt. Du brauchst ${fmtNum(respectCost)}.`);
+  state.cash -= cost;
+  state.respect -= respectCost;
+  state.units[id] = count + 1;
+  addLog(`${unit.name} rekrutiert. Crew: ${getCrewCount()}/${getCrewCap()}.`);
+  save(true);
+  renderAll();
+}
+
+function runChance(run) {
+  const power = getCrewPower();
+  const pressure = getPressure();
+  const defenseBonus = Math.min(20, getDefense() / 45);
+  const leaderBonus = state.leaderLevel * 1.4;
+  const chance = 58 + ((power - run.power) / Math.max(30, run.power)) * 38 - pressure * .28 + defenseBonus + leaderBonus;
+  return clamp(chance, 8, 94);
+}
+
+function startRun(id) {
+  const run = RUNS.find((entry) => entry.id === id);
+  if (!run) return;
+  if ((state.cooldowns[id] || 0) > 0) return toast('Dieser Run ist noch im Cooldown.');
+  const chance = runChance(run);
+  const roll = Math.random() * 100;
+  const heatMultiplier = Math.max(.45, 1 - (state.perks.streetwise || 0) * .03);
+
+  if (roll <= chance) {
+    const rewardBoost = 1 + (state.leaderLevel - 1) * .035 + (state.perks.negotiation || 0) * .01;
+    const reward = Math.floor(run.reward * rewardBoost);
+    const free = Math.max(0, getStorageCap() - state.cash);
+    const gained = Math.min(reward, free);
+    const lost = reward - gained;
+    state.cash += gained;
+    state.respect += run.respect;
+    state.influence += Math.floor(run.respect / 4);
+    state.heat = clamp(state.heat + run.heat * heatMultiplier, 0, 100);
+    state.cooldowns[id] = run.cooldown;
+    addLog(`${run.name} erfolgreich: +${fmtMoney(gained)}, +${run.respect} Respekt${lost > 0 ? `, ${fmtMoney(lost)} wegen vollem Lager verloren` : ''}.`);
+  } else {
+    const loss = Math.min(state.cash, Math.floor(run.reward * .18));
+    state.cash -= loss;
+    state.heat = clamp(state.heat + run.heat * 1.45 * heatMultiplier, 0, 100);
+    raiseFactionPressure(run.heat * .7);
+    state.cooldowns[id] = Math.floor(run.cooldown * .75);
+    addLog(`${run.name} fehlgeschlagen: -${fmtMoney(loss)}, Heat steigt.`);
+  }
+
+  save(true);
+  renderAll();
+}
+
+function raiseFactionPressure(amount) {
+  for (const faction of FACTIONS) {
+    const gain = amount * faction.heatImpact * (0.65 + Math.random() * 0.7);
+    state.factions[faction.id] = clamp((state.factions[faction.id] || 0) + gain, 0, 100);
+  }
+}
+
+function reduceFaction(id) {
+  const faction = FACTIONS.find((entry) => entry.id === id);
+  if (!faction) return;
+  const current = state.factions[id] || 0;
+  if (current <= 0) return toast(`${faction.name} ist ruhig.`);
+  const perkDiscount = 1 - (state.perks.negotiation || 0) * 0.05;
+  const cost = Math.floor(faction.baseCost * (1 + current / 34) * Math.max(.45, perkDiscount));
+  if (state.cash < cost) return toast(`Du brauchst ${fmtMoney(cost)} für diesen Deal.`);
+  state.cash -= cost;
+  state.factions[id] = clamp(current - 24, 0, 100);
+  state.heat = clamp(state.heat - 4, 0, 100);
+  addLog(`${faction.name} beruhigt. Druck gesenkt.`);
+  save(true);
+  renderAll();
+}
+
+function layLow() {
+  const cost = Math.floor(1200 + getInfluence() * 14 + state.heat * 120);
+  if (state.cash < cost) return toast(`Unauffällig bleiben kostet ${fmtMoney(cost)}.`);
+  state.cash -= cost;
+  state.heat = clamp(state.heat - 18, 0, 100);
+  for (const faction of FACTIONS) {
+    state.factions[faction.id] = clamp((state.factions[faction.id] || 0) - 8, 0, 100);
+  }
+  addLog(`Der Charter bleibt unauffällig. Heat und Druck sinken.`);
+  save(true);
+  renderAll();
+}
+
+function trainLeader() {
+  const cost = Math.floor(1800 * Math.pow(1.45, state.leaderLevel - 1));
+  const respectCost = Math.floor(18 * Math.pow(1.22, state.leaderLevel - 1));
+  if (state.cash < cost) return toast(`Training kostet ${fmtMoney(cost)}.`);
+  if (state.respect < respectCost) return toast(`Training braucht ${fmtNum(respectCost)} Respekt.`);
+  state.cash -= cost;
+  state.respect -= respectCost;
+  state.leaderLevel += 1;
+  addLog(`${state.leaderName} erreicht Level ${state.leaderLevel}.`);
+  save(true);
+  renderAll();
+}
+
+function upgradePerk(id) {
+  const perk = PERKS.find((entry) => entry.id === id);
+  if (!perk) return;
+  const level = state.perks[id] || 0;
+  if (level >= perk.max) return toast(`${perk.name} ist auf Max-Level.`);
+  const cost = Math.floor(perk.baseCost * Math.pow(1.58, level));
+  const respectCost = Math.floor(perk.respectCost * Math.pow(1.24, level));
+  if (state.cash < cost) return toast(`Nicht genug Cash. Du brauchst ${fmtMoney(cost)}.`);
+  if (state.respect < respectCost) return toast(`Nicht genug Respekt. Du brauchst ${fmtNum(respectCost)}.`);
+  state.cash -= cost;
+  state.respect -= respectCost;
+  state.perks[id] = level + 1;
+  addLog(`${perk.name} auf Level ${level + 1}/${perk.max} verbessert.`);
+  save(true);
+  renderAll();
 }
 
 function addLog(text) {
-  state.log.unshift({ time: Date.now(), text });
+  state.log.unshift({ time: minute(), text });
   state.log = state.log.slice(0, 40);
-  renderLog();
 }
 
-function showModal(title, text) {
-  const modal = $('#modal');
-  $('#modalTitle').textContent = title;
-  $('#modalText').textContent = text;
-  if (typeof modal.showModal === 'function') modal.showModal();
+function toast(text) {
+  const toastEl = $('#toast');
+  toastEl.textContent = text;
+  toastEl.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2300);
+}
+
+function showDialog(title, text) {
+  const dialog = $('#confirmDialog');
+  $('#dialogTitle').textContent = title;
+  $('#dialogText').textContent = text;
+  if (typeof dialog.showModal === 'function') dialog.showModal();
   else alert(`${title}\n\n${text}`);
 }
 
-function tick(seconds = TICK_MS / 1000) {
-  derived = getDerived();
-  const ticks = seconds / (TICK_MS / 1000);
-  const income = derived.incomePerTick * ticks;
-  const respectGain = derived.respectPerTick * ticks;
-  const heatGain = derived.heatPerTick * ticks;
-
-  const beforeCash = state.cash;
-  state.cash = clamp(state.cash + income, 0, derived.storage);
-  state.respect += respectGain;
-  state.heat = clamp(state.heat + heatGain, 0, 100);
-
-  if (state.cash >= derived.storage && beforeCash < derived.storage) {
-    addLog('Dein Geldlager ist voll. Werte das Geldlager auf, damit keine Einnahmen verloren gehen.');
-  }
-
-  if (state.heat >= 85 && Math.random() < 0.16) {
-    const loss = Math.min(state.cash, Math.max(250, state.cash * 0.08));
-    state.cash -= loss;
-    state.heat = clamp(state.heat - 4, 0, 100);
-    addLog(`Risk-Event: Hoher Druck hat dich ${fmtMoney(loss)} gekostet.`);
-  }
-
-  renderAll();
-  saveState(true);
+function renderAll(force = false) {
+  const current = now();
+  if (!force && current - lastRender < 120) return;
+  lastRender = current;
+  renderSetup();
+  renderHeader();
+  renderStats();
+  renderBuildings();
+  renderCrew();
+  renderRuns();
+  renderFactions();
+  renderMc();
+  renderProfile();
+  renderLog();
 }
 
-function applyOfflineProgress() {
-  const now = Date.now();
-  const last = state.lastTick || now;
-  const elapsed = Math.min(MAX_OFFLINE_SECONDS, Math.max(0, Math.floor((now - last) / 1000)));
-  if (elapsed < 15) return;
-  derived = getDerived();
-  const oldCash = state.cash;
-  const oldRespect = state.respect;
-  const oldHeat = state.heat;
-  state.cash = clamp(state.cash + derived.incomePerTick * (elapsed / 3), 0, derived.storage);
-  state.respect += derived.respectPerTick * (elapsed / 3);
-  state.heat = clamp(state.heat + derived.heatPerTick * (elapsed / 3), 0, 100);
-  state.lastTick = now;
-  const gainedCash = state.cash - oldCash;
-  const gainedRespect = state.respect - oldRespect;
-  const gainedHeat = state.heat - oldHeat;
-  addLog(`Offline-Fortschritt: +${fmtMoney(gainedCash)}, +${fmtNum(gainedRespect)} Respekt, +${Math.floor(gainedHeat)}% Heat.`);
+function renderSetup() {
+  $('#setupOverlay').hidden = !!state.setupDone;
 }
 
-function renderResources() {
-  derived = getDerived();
-  $('#clubName').textContent = state.name;
+function renderHeader() {
+  $('#clubTitle').textContent = state.clubName;
+  $('#clubNameHero').textContent = state.clubName;
+  $('#leaderLine').textContent = `${state.rank}: ${state.leaderName}`;
+  updateKutte($('#heroKutte'));
+  updateKutte($('#mcKutteBig'));
+}
+
+function renderStats() {
+  const cap = getStorageCap();
   $('#cashValue').textContent = fmtMoney(state.cash);
-  $('#cashCap').textContent = `Lager: ${fmtMoney(derived.storage)}`;
+  $('#cashCapValue').textContent = `Lager ${fmtMoney(cap)}`;
+  $('#incomeValue').textContent = `${fmtMoney(getTotalIncomePerMinute())}/min`;
+  $('#storedValue').textContent = `${fmtMoney(getStoredIncome())} bereit`;
   $('#respectValue').textContent = fmtNum(state.respect);
-  $('#crewValue').textContent = `${fmtNum(derived.crewUsed)} / ${fmtNum(derived.crewCap)}`;
-  $('#powerValue').textContent = `Power: ${fmtNum(derived.power)}`;
-  $('#heatValue').textContent = `${Math.floor(state.heat)}%`;
-  $('#pressureValue').textContent = `Druck: ${pressureText(state.heat)}`;
-  $('#leaderName').textContent = state.leaderName;
-  $('#leaderStats').textContent = `Level ${state.level} · Einfluss ${fmtNum(state.xp)}`;
-}
-
-function pressureText(heat) {
-  if (heat < 25) return 'niedrig';
-  if (heat < 55) return 'mittel';
-  if (heat < 80) return 'hoch';
-  return 'kritisch';
+  $('#respectGainValue').textContent = `+${fmtNum(getRespectPerMinute())}/min`;
+  $('#crewValue').textContent = `${getCrewCount()}/${getCrewCap()}`;
+  $('#powerValue').textContent = `Power ${fmtNum(getCrewPower())}`;
+  $('#heatValue').textContent = percent(state.heat);
+  const pressure = getPressure();
+  $('#dangerValue').textContent = pressure < 30 ? 'Druck niedrig' : pressure < 65 ? 'Druck mittel' : 'Druck hoch';
 }
 
 function renderBuildings() {
   const grid = $('#buildingGrid');
-  grid.innerHTML = '';
+  grid.innerHTML = BUILDINGS.map((building) => {
+    const level = getLevel(building.id);
+    const locked = !canUnlock(building);
+    const next = Math.min(BUILDING_MAX, level + 1);
+    const income = buildingIncome(building, level);
+    const nextIncome = level < BUILDING_MAX ? buildingIncome(building, next) : income;
+    const incomeGain = Math.max(0, nextIncome - income);
+    const stored = state.bank[building.id] || 0;
+    const collectCap = buildingStorage(building, level);
+    const cost = level < BUILDING_MAX ? upgradeCost(building, next) : 0;
+    const respectCost = level < BUILDING_MAX ? upgradeRespectCost(building, next) : 0;
+    const canAfford = state.cash >= cost && state.respect >= respectCost && !locked;
+    const progress = (level / BUILDING_MAX) * 100;
+    const buttonText = level <= 0 ? 'Bauen' : level >= BUILDING_MAX ? 'Max' : 'Upgrade';
 
-  for (const blueprint of BUILDING_BLUEPRINTS) {
-    const data = state.buildings[blueprint.id];
-    const level = data.level || 0;
-    const cost = buildingCost(blueprint, level);
-    const maxed = level >= blueprint.maxLevel;
-    const affordable = canPay(cost);
-    const locked = blueprint.id === 'harbor' && (state.buildings.eastblock.level || 0) < 2;
-    const lockedIndustrial = blueprint.id === 'industrial' && (state.buildings.harbor.level || 0) < 2;
-    const isLocked = locked || lockedIndustrial;
-    const effectsText = effectText(blueprint.effects, level);
-
-    const card = document.createElement('article');
-    card.className = 'game-card';
-    card.innerHTML = `
-      <div class="card-head">
-        <div class="icon-badge">${blueprint.icon}</div>
-        <span class="level-pill">Lvl ${level}/${blueprint.maxLevel}</span>
-      </div>
-      <div>
-        <h4>${blueprint.name}</h4>
-        <p>${blueprint.desc}</p>
-      </div>
-      <div class="progress" aria-hidden="true"><span style="width:${(level / blueprint.maxLevel) * 100}%"></span></div>
-      <div class="stat-row">
-        <div class="stat-box"><small>Aktuell</small><strong>${effectsText || 'Noch kein Effekt'}</strong></div>
-        <div class="stat-box"><small>Nächster Preis</small><strong>${maxed ? 'Max' : `${fmtMoney(cost.cash)} · ${fmtNum(cost.respect)} R`}</strong></div>
-      </div>
-      <div class="card-actions">
-        <button class="primary-btn" data-upgrade="${blueprint.id}" ${maxed || !affordable || isLocked ? 'disabled' : ''}>${level === 0 ? 'Bauen' : 'Upgraden'}</button>
-      </div>
-      <div class="cost-line">${isLocked ? lockText(blueprint.id) : maxed ? 'Maximale Stufe erreicht.' : affordable ? `Upgrade auf Level ${cost.next} bereit.` : `Benötigt ${fmtMoney(Math.max(0, cost.cash - state.cash))} & ${fmtNum(Math.max(0, cost.respect - state.respect))} Respekt mehr.`}</div>
+    return `
+      <article class="card ${locked ? 'locked' : ''}">
+        <div class="card-top">
+          <div class="card-icon">${building.icon}</div>
+          <div class="card-title">
+            <h3>${building.name}</h3>
+            <p>${locked ? `Benötigt Clubhouse Level ${building.unlock}.` : building.desc}</p>
+          </div>
+          <div class="level-pill">Lvl ${level}/${BUILDING_MAX}</div>
+        </div>
+        <div class="card-body">
+          <div class="progress-track"><div class="progress-fill" style="width:${progress}%"></div></div>
+          <div class="meta-grid">
+            <div class="meta"><span>Gewinn</span><strong>${fmtMoney(income)}/min</strong></div>
+            <div class="meta"><span>Nächstes +</span><strong>${fmtMoney(incomeGain)}/min</strong></div>
+            <div class="meta"><span>Bereit</span><strong>${fmtMoney(stored)}</strong></div>
+            <div class="meta"><span>Gebäude-Lager</span><strong>${fmtMoney(collectCap)}</strong></div>
+          </div>
+          <div class="badge-row">
+            ${building.effects.storage ? `<span class="badge gold">Lager +${fmtMoney(building.effects.storage * effectLevel(level || 1))}</span>` : ''}
+            ${building.effects.crewCap ? `<span class="badge green">Crew +${Math.floor(building.effects.crewCap * level)}</span>` : ''}
+            ${building.effects.heat ? `<span class="badge red">Heat +${building.effects.heat.toFixed(2)}/Lvl</span>` : ''}
+            ${building.effects.defense ? `<span class="badge">Defense +${Math.floor(building.effects.defense * level)}</span>` : ''}
+          </div>
+          <div class="card-actions">
+            <button class="btn btn-ghost" type="button" data-action="collect-building" data-id="${building.id}" ${stored <= 0 || level <= 0 ? 'disabled' : ''}>Einsammeln</button>
+            <button class="btn ${canAfford && level < BUILDING_MAX ? 'btn-primary' : 'btn-ghost'}" type="button" data-action="upgrade-building" data-id="${building.id}" ${locked || level >= BUILDING_MAX ? 'disabled' : ''}>
+              ${buttonText} · ${level >= BUILDING_MAX ? 'fertig' : `${fmtMoney(cost)}${respectCost ? ` · ${fmtNum(respectCost)} Respekt` : ''}`}
+            </button>
+          </div>
+        </div>
+      </article>
     `;
-    grid.appendChild(card);
-  }
+  }).join('');
 }
 
-function lockText(id) {
-  if (id === 'harbor') return 'Benötigt East Block Level 2.';
-  if (id === 'industrial') return 'Benötigt Harbor Block Level 2.';
-  return 'Noch gesperrt.';
-}
+function renderCrew() {
+  const grid = $('#crewGrid');
+  grid.innerHTML = UNITS.map((unit) => {
+    const count = state.units[unit.id] || 0;
+    const cost = Math.floor(unit.baseCost * Math.pow(unit.growth, count));
+    const respectCost = Math.floor(unit.respectCost * Math.pow(1.13, count));
+    const canRecruit = state.cash >= cost && state.respect >= respectCost && getCrewCount() < getCrewCap();
 
-function effectText(effects, level) {
-  if (!effects || level <= 0) return '';
-  const parts = [];
-  if (effects.income) parts.push(`+${fmtMoney(effects.income * level)}/Tick`);
-  if (effects.storage) parts.push(`+${fmtMoney(effects.storage * level)} Lager`);
-  if (effects.crewCap) parts.push(`+${effects.crewCap * level} Crew`);
-  if (effects.power) parts.push(`+${effects.power * level} Power`);
-  if (effects.defense) parts.push(`+${effects.defense * level} Def`);
-  if (effects.control) parts.push(`+${effects.control * level} Kontrolle`);
-  return parts.slice(0, 2).join(' · ');
-}
-
-function renderUnits() {
-  const grid = $('#unitGrid');
-  grid.innerHTML = '';
-  derived = getDerived();
-
-  for (const unit of UNIT_BLUEPRINTS) {
-    const count = state.units[unit.id].count || 0;
-    const cost = unitCost(unit);
-    const hasCap = derived.crewUsed + unit.capUse <= derived.crewCap;
-    const affordable = canPay(cost);
-    const card = document.createElement('article');
-    card.className = 'game-card';
-    card.innerHTML = `
-      <div class="card-head">
-        <div class="icon-badge">${unit.icon}</div>
-        <span class="level-pill">${fmtNum(count)}x</span>
-      </div>
-      <div>
-        <h4>${unit.name}</h4>
-        <p>${unit.desc}</p>
-      </div>
-      <div class="stat-row">
-        <div class="stat-box"><small>Stärke</small><strong>+${unit.power} Power</strong></div>
-        <div class="stat-box"><small>Slot / Einnahme</small><strong>${unit.capUse} Slot · +${fmtMoney(unit.income)}/Tick</strong></div>
-      </div>
-      <div class="card-actions">
-        <button class="primary-btn" data-recruit="${unit.id}" ${!affordable || !hasCap ? 'disabled' : ''}>Rekrutieren</button>
-      </div>
-      <div class="cost-line">${hasCap ? `Kosten: ${fmtMoney(cost.cash)} · ${fmtNum(cost.respect)} Respekt` : 'Crew-Limit voll. Baue Clubhouse oder Nomad Camp aus.'}</div>
+    return `
+      <article class="card">
+        <div class="card-top">
+          <div class="card-icon">${unit.icon}</div>
+          <div class="card-title">
+            <h3>${unit.name}</h3>
+            <p>${unit.desc}</p>
+          </div>
+          <div class="level-pill">x${count}</div>
+        </div>
+        <div class="card-body">
+          <div class="meta-grid">
+            <div class="meta"><span>Power je</span><strong>${fmtNum(unit.power)}</strong></div>
+            <div class="meta"><span>Gesamt</span><strong>${fmtNum(unit.power * count)}</strong></div>
+            <div class="meta"><span>Kosten</span><strong>${fmtMoney(cost)}</strong></div>
+            <div class="meta"><span>Respekt</span><strong>${fmtNum(respectCost)}</strong></div>
+          </div>
+          <div class="card-actions single">
+            <button class="btn ${canRecruit ? 'btn-primary' : 'btn-ghost'}" type="button" data-action="recruit" data-id="${unit.id}">Rekrutieren</button>
+          </div>
+        </div>
+      </article>
     `;
-    grid.appendChild(card);
-  }
+  }).join('');
 }
 
-function renderMissions() {
-  const grid = $('#missionGrid');
-  grid.innerHTML = '';
-  derived = getDerived();
-  const now = Date.now();
+function renderRuns() {
+  const grid = $('#runGrid');
+  grid.innerHTML = RUNS.map((run) => {
+    const chance = runChance(run);
+    const cd = Math.ceil(state.cooldowns[run.id] || 0);
+    const ready = cd <= 0;
+    const enough = getCrewPower() >= run.power * .45;
 
-  for (const mission of MISSION_BLUEPRINTS) {
-    const readyAt = state.missions[mission.id] || 0;
-    const remaining = Math.max(0, Math.ceil((readyAt - now) / 1000));
-    const chance = missionChance(mission);
-    const card = document.createElement('article');
-    card.className = 'game-card';
-    card.innerHTML = `
-      <div class="card-head">
-        <div class="icon-badge">${mission.icon}</div>
-        <span class="level-pill">${chance}% Chance</span>
-      </div>
-      <div>
-        <h4>${mission.name}</h4>
-        <p>${mission.desc}</p>
-      </div>
-      <div class="progress" aria-hidden="true"><span style="width:${chance}%"></span></div>
-      <div class="stat-row">
-        <div class="stat-box"><small>Belohnung</small><strong>${fmtMoney(mission.cash)} · ${mission.respect} R</strong></div>
-        <div class="stat-box"><small>Risiko</small><strong>+${mission.heat}% Heat</strong></div>
-      </div>
-      <div class="card-actions">
-        <button class="primary-btn" data-run="${mission.id}" ${remaining > 0 || derived.power < Math.floor(mission.requiredPower * 0.45) ? 'disabled' : ''}>${remaining > 0 ? `${remaining}s` : 'Run starten'}</button>
-      </div>
-      <div class="cost-line">Empfohlen: ${mission.requiredPower} Power · Deine Power: ${fmtNum(derived.power)}</div>
+    return `
+      <article class="card">
+        <div class="card-top">
+          <div class="card-icon">${run.icon}</div>
+          <div class="card-title">
+            <h3>${run.name}</h3>
+            <p>${run.desc}</p>
+          </div>
+          <div class="level-pill">${percent(chance)}</div>
+        </div>
+        <div class="card-body">
+          <div class="progress-track"><div class="progress-fill" style="width:${chance}%"></div></div>
+          <div class="meta-grid">
+            <div class="meta"><span>Power nötig</span><strong>${fmtNum(run.power)}</strong></div>
+            <div class="meta"><span>Deine Power</span><strong>${fmtNum(getCrewPower())}</strong></div>
+            <div class="meta"><span>Belohnung</span><strong>${fmtMoney(run.reward)}</strong></div>
+            <div class="meta"><span>Heat</span><strong>+${run.heat}%</strong></div>
+          </div>
+          <div class="card-actions single">
+            <button class="btn ${ready && enough ? 'btn-primary' : 'btn-ghost'}" type="button" data-action="start-run" data-id="${run.id}" ${!ready ? 'disabled' : ''}>${ready ? 'Run starten' : `Cooldown ${cd}s`}</button>
+          </div>
+        </div>
+      </article>
     `;
-    grid.appendChild(card);
-  }
-}
-
-function missionChance(mission) {
-  derived = getDerived();
-  const base = (derived.power + derived.missionBonus) / mission.requiredPower;
-  const heatPenalty = state.heat * 0.35;
-  return Math.floor(clamp(base * 70 + 18 - heatPenalty, 8, 96));
+  }).join('');
 }
 
 function renderFactions() {
   const grid = $('#factionGrid');
-  grid.innerHTML = '';
+  grid.innerHTML = FACTIONS.map((faction) => {
+    const value = clamp(state.factions[faction.id] || 0, 0, 100);
+    const perkDiscount = 1 - (state.perks.negotiation || 0) * 0.05;
+    const cost = Math.floor(faction.baseCost * (1 + value / 34) * Math.max(.45, perkDiscount));
+    const label = value < 30 ? 'ruhig' : value < 65 ? 'angespannt' : 'kritisch';
 
-  for (const faction of FACTION_BLUEPRINTS) {
-    const data = state.factions[faction.id];
-    const pressure = clamp(data.pressure + state.heat * 0.25, 0, 100);
-    const cost = Math.floor(faction.baseCost * (1 + pressure / 70) * (1 + state.level * 0.04));
-    const canBribe = state.cash >= cost;
-    const card = document.createElement('article');
-    card.className = 'game-card';
-    card.innerHTML = `
-      <div class="card-head">
-        <div class="icon-badge">${faction.icon}</div>
-        <span class="level-pill">${Math.floor(pressure)}%</span>
-      </div>
-      <div>
-        <h4>${faction.name}</h4>
-        <p>${faction.desc}</p>
-      </div>
-      <div class="progress" aria-hidden="true"><span style="width:${pressure}%"></span></div>
-      <div class="stat-row">
-        <div class="stat-box"><small>Beruhigt</small><strong>-${faction.heatDrop}% Heat</strong></div>
-        <div class="stat-box"><small>Kosten</small><strong>${fmtMoney(cost)}</strong></div>
-      </div>
-      <div class="card-actions">
-        <button class="primary-btn" data-bribe="${faction.id}" ${!canBribe ? 'disabled' : ''}>Beruhigen</button>
-      </div>
-      <div class="cost-line">${canBribe ? 'Sofort möglich.' : `Es fehlen ${fmtMoney(cost - state.cash)}.`}</div>
+    return `
+      <article class="card">
+        <div class="card-top">
+          <div class="card-icon">${faction.icon}</div>
+          <div class="card-title">
+            <h3>${faction.name}</h3>
+            <p>${faction.desc}</p>
+          </div>
+          <div class="level-pill">${Math.round(value)}%</div>
+        </div>
+        <div class="card-body">
+          <div class="progress-track"><div class="progress-fill" style="width:${value}%"></div></div>
+          <div class="meta-grid">
+            <div class="meta"><span>Status</span><strong>${label}</strong></div>
+            <div class="meta"><span>Deal kostet</span><strong>${fmtMoney(cost)}</strong></div>
+          </div>
+          <div class="card-actions single">
+            <button class="btn ${state.cash >= cost ? 'btn-primary' : 'btn-ghost'}" type="button" data-action="reduce-faction" data-id="${faction.id}">Druck senken</button>
+          </div>
+        </div>
+      </article>
     `;
-    grid.appendChild(card);
-  }
-}
-
-function renderPerks() {
-  const grid = $('#perkGrid');
-  grid.innerHTML = '';
-
-  for (const perk of PERKS) {
-    const data = state.perks[perk.id];
-    const cost = perkCost(perk);
-    const maxed = data.level >= perk.max;
-    const affordable = canPay(cost);
-    const card = document.createElement('article');
-    card.className = 'game-card';
-    card.innerHTML = `
-      <div class="card-head">
-        <div class="icon-badge">${perk.icon}</div>
-        <span class="level-pill">Lvl ${data.level}/${perk.max}</span>
-      </div>
-      <div>
-        <h4>${perk.name}</h4>
-        <p>${perk.desc}</p>
-      </div>
-      <div class="progress" aria-hidden="true"><span style="width:${(data.level / perk.max) * 100}%"></span></div>
-      <div class="card-actions">
-        <button class="primary-btn" data-perk="${perk.id}" ${maxed || !affordable ? 'disabled' : ''}>Verbessern</button>
-      </div>
-      <div class="cost-line">${maxed ? 'Maximale Stufe erreicht.' : `Kosten: ${fmtMoney(cost.cash)} · ${fmtNum(cost.respect)} Respekt`}</div>
-    `;
-    grid.appendChild(card);
-  }
-}
-
-function renderLog() {
-  const list = $('#logList');
-  if (!list) return;
-  list.innerHTML = state.log.map((entry) => {
-    const time = new Date(entry.time).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
-    return `<div class="log-item"><strong>${time}</strong> · ${entry.text}</div>`;
   }).join('');
 }
 
-function renderAll() {
-  renderResources();
-  renderBuildings();
-  renderUnits();
-  renderMissions();
-  renderFactions();
-  renderPerks();
-  renderLog();
+function fillSelect(select, options, value) {
+  select.innerHTML = options.map(([id, label]) => `<option value="${id}" ${id === value ? 'selected' : ''}>${label}</option>`).join('');
 }
 
-function upgradeBuilding(id) {
-  const blueprint = getBuilding(id);
-  if (!blueprint) return;
-  const current = state.buildings[id].level || 0;
-  if (current >= blueprint.maxLevel) return;
-  const cost = buildingCost(blueprint, current);
-  if (!canPay(cost)) return showModal('Nicht genug Ressourcen', 'Dir fehlen Geld oder Respekt für dieses Upgrade.');
-  pay(cost);
-  state.buildings[id].level = current + 1;
-  state.xp += 8 + state.buildings[id].level * 2;
-  maybeLevelUp();
-  addLog(`${blueprint.name} auf Level ${state.buildings[id].level} verbessert.`);
-  renderAll();
-  saveState(true);
+function renderMc() {
+  $('#editClubName').value = state.clubName;
+  $('#editLeaderName').value = state.leaderName;
+  $('#editPatchText').value = state.patchText;
+  fillSelect($('#editEmblem'), SELECT_OPTIONS.emblem, state.emblem);
+  fillSelect($('#editVest'), SELECT_OPTIONS.vest, state.vest);
+  fillSelect($('#editTrim'), SELECT_OPTIONS.trim, state.trim);
+  $('#editRank').value = state.rank;
 }
 
-function recruitUnit(id) {
-  const unit = getUnit(id);
-  if (!unit) return;
-  derived = getDerived();
-  if (derived.crewUsed + unit.capUse > derived.crewCap) {
-    return showModal('Crew-Limit voll', 'Baue Clubhouse, Nomad Camp oder Leadership aus, damit mehr Leute Platz haben.');
-  }
-  const cost = unitCost(unit);
-  if (!canPay(cost)) return showModal('Nicht genug Ressourcen', 'Dir fehlen Geld oder Respekt für diese Rekrutierung.');
-  pay(cost);
-  state.units[id].count += 1;
-  state.xp += 6 + unit.power * 0.2;
-  maybeLevelUp();
-  addLog(`${unit.name} rekrutiert.`);
-  renderAll();
-  saveState(true);
+function renderProfile() {
+  $('#profileName').textContent = state.leaderName;
+  $('#profileStats').textContent = `Level ${state.leaderLevel} · Einfluss ${fmtNum(getInfluence())}`;
+  const grid = $('#perkGrid');
+  grid.innerHTML = PERKS.map((perk) => {
+    const level = state.perks[perk.id] || 0;
+    const cost = Math.floor(perk.baseCost * Math.pow(1.58, level));
+    const respectCost = Math.floor(perk.respectCost * Math.pow(1.24, level));
+    const maxed = level >= perk.max;
+    const can = state.cash >= cost && state.respect >= respectCost && !maxed;
+    return `
+      <article class="card">
+        <div class="card-top">
+          <div class="card-icon">${perk.icon}</div>
+          <div class="card-title">
+            <h3>${perk.name}</h3>
+            <p>${perk.desc}</p>
+          </div>
+          <div class="level-pill">${level}/${perk.max}</div>
+        </div>
+        <div class="card-body">
+          <div class="progress-track"><div class="progress-fill" style="width:${(level / perk.max) * 100}%"></div></div>
+          <div class="meta-grid">
+            <div class="meta"><span>Cash</span><strong>${maxed ? 'Max' : fmtMoney(cost)}</strong></div>
+            <div class="meta"><span>Respekt</span><strong>${maxed ? 'Max' : fmtNum(respectCost)}</strong></div>
+          </div>
+          <div class="card-actions single">
+            <button class="btn ${can ? 'btn-primary' : 'btn-ghost'}" type="button" data-action="upgrade-perk" data-id="${perk.id}" ${maxed ? 'disabled' : ''}>${maxed ? 'Max-Level' : 'Perk verbessern'}</button>
+          </div>
+        </div>
+      </article>
+    `;
+  }).join('');
 }
 
-function runMission(id) {
-  const mission = MISSION_BLUEPRINTS.find((m) => m.id === id);
-  if (!mission) return;
-  const now = Date.now();
-  if ((state.missions[id] || 0) > now) return;
-  const chance = missionChance(mission);
-  const success = Math.random() * 100 <= chance;
-  const heatModifier = 1 - state.perks.streetwise.level * 0.025;
-  state.missions[id] = now + mission.cooldown * 1000;
-
-  if (success) {
-    const cashReward = mission.cash * (1 + state.perks.logistics.level * 0.03);
-    const respectReward = mission.respect * (1 + state.perks.leadership.level * 0.04);
-    state.cash = clamp(state.cash + cashReward, 0, derived.storage);
-    state.respect += respectReward;
-    state.heat = clamp(state.heat + mission.heat * heatModifier, 0, 100);
-    state.xp += mission.respect;
-    addLog(`${mission.name} erfolgreich: +${fmtMoney(cashReward)}, +${fmtNum(respectReward)} Respekt.`);
-  } else {
-    const loss = Math.min(state.cash, Math.floor(mission.cash * 0.28));
-    state.cash -= loss;
-    state.heat = clamp(state.heat + mission.heat * 1.45 * heatModifier, 0, 100);
-    addLog(`${mission.name} fehlgeschlagen: ${fmtMoney(loss)} verloren und Heat gestiegen.`);
-  }
-
-  maybeLevelUp();
-  renderAll();
-  saveState(true);
+function renderLog() {
+  const log = $('#logList');
+  log.innerHTML = state.log.map((entry) => `<div class="log-item"><span class="log-time">${entry.time}</span>${entry.text}</div>`).join('');
 }
 
-function bribeFaction(id) {
-  const faction = FACTION_BLUEPRINTS.find((f) => f.id === id);
-  if (!faction) return;
-  const data = state.factions[id];
-  const pressure = clamp(data.pressure + state.heat * 0.25, 0, 100);
-  const cost = Math.floor(faction.baseCost * (1 + pressure / 70) * (1 + state.level * 0.04));
-  if (state.cash < cost) return showModal('Zu wenig Geld', 'Du kannst diese Fraktion noch nicht beruhigen.');
-  state.cash -= cost;
-  state.heat = clamp(state.heat - faction.heatDrop, 0, 100);
-  data.pressure = clamp(data.pressure - 18, 0, 100);
-  data.lastBribe = Date.now();
-  addLog(`${faction.name} beruhigt. Heat um ${faction.heatDrop}% gesenkt.`);
-  renderAll();
-  saveState(true);
+function updateKutte(el) {
+  if (!el) return;
+  el.className = el.className
+    .split(' ')
+    .filter((part) => !part.startsWith('vest-') && !part.startsWith('trim-') && !part.startsWith('emblem-'))
+    .join(' ');
+  el.classList.add(`vest-${state.vest}`, `trim-${state.trim}`, `emblem-${state.emblem}`);
+  const top = el.querySelector('.top-rocker');
+  const bottom = el.querySelector('.bottom-rocker');
+  const emblem = el.querySelector('.emblem');
+  const words = String(state.patchText || 'MC').trim().toUpperCase().split(/\s+/);
+  top.textContent = words[0] || 'ROAD';
+  bottom.textContent = words.slice(1).join(' ') || state.clubName.replace(/\s?MC$/i, '').slice(0, 12).toUpperCase();
+  emblem.textContent = EMBLEMS[state.emblem] || '🏍️';
 }
 
-function improvePerk(id) {
-  const perk = getPerk(id);
-  if (!perk) return;
-  const data = state.perks[id];
-  if (data.level >= perk.max) return;
-  const cost = perkCost(perk);
-  if (!canPay(cost)) return showModal('Nicht genug Ressourcen', 'Dir fehlen Geld oder Respekt für dieses Training.');
-  pay(cost);
-  data.level += 1;
-  state.xp += 18 + data.level * 4;
-  maybeLevelUp();
-  addLog(`${perk.name} auf Level ${data.level} verbessert.`);
-  renderAll();
-  saveState(true);
-}
-
-function maybeLevelUp() {
-  let needed = state.level * 120;
-  while (state.xp >= needed) {
-    state.xp -= needed;
-    state.level += 1;
-    state.cash = clamp(state.cash + state.level * 180, 0, getDerived().storage);
-    state.respect += state.level * 12;
-    addLog(`Charter-Level ${state.level} erreicht. Bonus erhalten.`);
-    needed = state.level * 120;
-  }
-}
-
-function collectIncome() {
-  derived = getDerived();
-  const bonus = Math.min(derived.storage - state.cash, Math.max(50, derived.incomePerTick * 6));
-  if (bonus <= 0) return showModal('Lager voll', 'Dein Geldlager ist voll. Baue es aus, bevor du mehr einsammelst.');
-  state.cash += bonus;
-  state.respect += Math.max(1, derived.respectPerTick * 2);
-  addLog(`Schnelleinnahmen eingesammelt: +${fmtMoney(bonus)}.`);
-  renderAll();
-  saveState(true);
-}
-
-function upgradeCheapest() {
-  const options = BUILDING_BLUEPRINTS
-    .map((blueprint) => ({ blueprint, level: state.buildings[blueprint.id].level || 0, cost: buildingCost(blueprint) }))
-    .filter((item) => item.level < item.blueprint.maxLevel && canPay(item.cost))
-    .sort((a, b) => (a.cost.cash + a.cost.respect * 25) - (b.cost.cash + b.cost.respect * 25));
-  if (!options.length) return showModal('Kein Upgrade bereit', 'Aktuell reicht es für kein Gebäude-Upgrade. Sammle mehr Geld oder Respekt.');
-  upgradeBuilding(options[0].blueprint.id);
-}
-
-function cooldownHeat() {
-  derived = getDerived();
-  const drop = Math.max(3, 6 + state.perks.streetwise.level + derived.defense * 0.04);
-  state.heat = clamp(state.heat - drop, 0, 100);
-  for (const key of Object.keys(state.factions)) {
-    state.factions[key].pressure = clamp((state.factions[key].pressure || 0) - 2, 0, 100);
-  }
-  addLog(`Heat aktiv abgebaut: -${Math.floor(drop)}%.`);
-  renderAll();
-  saveState(true);
-}
-
-function trainLeader() {
-  const cost = {
-    cash: Math.floor(650 * Math.pow(1.5, state.level - 1)),
-    respect: Math.floor(18 * Math.pow(1.3, state.level - 1))
+function updateSetupPreview() {
+  const temp = {
+    patchText: $('#setupPatchText').value || 'MC',
+    clubName: $('#setupClubName').value || 'Road Charter MC',
+    emblem: $('#setupEmblem').value,
+    vest: $('#setupVest').value,
+    trim: $('#setupTrim').value
   };
-  if (!canPay(cost)) {
-    return showModal('Training nicht möglich', `Du brauchst ${fmtMoney(cost.cash)} und ${fmtNum(cost.respect)} Respekt.`);
-  }
-  pay(cost);
-  state.xp += 95;
-  maybeLevelUp();
-  addLog('Charaktertraining abgeschlossen. Einfluss steigt.');
-  renderAll();
-  saveState(true);
+  const old = { ...state };
+  Object.assign(state, temp);
+  updateKutte($('#setupKuttePreview'));
+  Object.assign(state, old);
 }
 
-function renameClub() {
-  const name = prompt('Neuer Charter-Name:', state.name);
-  if (!name) return;
-  state.name = name.trim().slice(0, 34) || state.name;
-  addLog(`Charter umbenannt in ${state.name}.`);
-  renderAll();
-  saveState(true);
+function createClub() {
+  state.clubName = $('#setupClubName').value.trim() || 'Road Charter MC';
+  state.leaderName = $('#setupLeaderName').value.trim() || 'Road Captain';
+  state.patchText = $('#setupPatchText').value.trim() || 'MC';
+  state.emblem = $('#setupEmblem').value;
+  state.vest = $('#setupVest').value;
+  state.trim = $('#setupTrim').value;
+  state.setupDone = true;
+  addLog(`${state.clubName} wurde gegründet. Kutte und Patch sind bereit.`);
+  save(true);
+  renderAll(true);
+  toast('MC gegründet. Viel Spaß!');
+}
+
+function applyMcEdit() {
+  state.clubName = $('#editClubName').value.trim() || state.clubName;
+  state.leaderName = $('#editLeaderName').value.trim() || state.leaderName;
+  state.patchText = $('#editPatchText').value.trim() || state.patchText;
+  state.emblem = $('#editEmblem').value;
+  state.vest = $('#editVest').value;
+  state.trim = $('#editTrim').value;
+  state.rank = $('#editRank').value;
+  addLog('MC-Daten und Kutte aktualisiert.');
+  save(true);
+  renderAll(true);
+  toast('MC gespeichert.');
+}
+
+function switchScreen(screen) {
+  $$('.screen').forEach((el) => el.classList.remove('active-screen'));
+  $(`#screen-${screen}`).classList.add('active-screen');
+  $$('.nav-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.screen === screen));
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function handleClick(event) {
+  const target = event.target.closest('[data-action]');
+  if (!target) return;
+  const action = target.dataset.action;
+  const id = target.dataset.id;
+  if (action === 'upgrade-building') upgradeBuilding(id);
+  if (action === 'collect-building') collectBuilding(id);
+  if (action === 'recruit') recruit(id);
+  if (action === 'start-run') startRun(id);
+  if (action === 'reduce-faction') reduceFaction(id);
+  if (action === 'upgrade-perk') upgradePerk(id);
 }
 
 function bindEvents() {
-  document.body.addEventListener('click', (event) => {
-    const target = event.target.closest('button');
-    if (!target) return;
-
-    if (target.matches('.tab')) {
-      $$('.tab').forEach((tab) => tab.classList.toggle('active', tab === target));
-      $$('.screen').forEach((screen) => screen.classList.toggle('active-screen', screen.id === target.dataset.tab));
-      return;
-    }
-
-    if (target.dataset.upgrade) upgradeBuilding(target.dataset.upgrade);
-    if (target.dataset.recruit) recruitUnit(target.dataset.recruit);
-    if (target.dataset.run) runMission(target.dataset.run);
-    if (target.dataset.bribe) bribeFaction(target.dataset.bribe);
-    if (target.dataset.perk) improvePerk(target.dataset.perk);
-  });
-
-  $('#saveBtn').addEventListener('click', () => saveState(false));
-  $('#collectBtn').addEventListener('click', collectIncome);
-  $('#renameBtn').addEventListener('click', renameClub);
-  $('#upgradeCheapestBtn').addEventListener('click', upgradeCheapest);
-  $('#cooldownBtn').addEventListener('click', cooldownHeat);
-  $('#trainLeaderBtn').addEventListener('click', trainLeader);
+  document.addEventListener('click', handleClick);
+  $$('.nav-btn').forEach((btn) => btn.addEventListener('click', () => switchScreen(btn.dataset.screen)));
+  $('#collectAllBtn').addEventListener('click', collectAll);
+  $('#saveBtn').addEventListener('click', () => save(false));
+  $('#upgradeBestBtn').addEventListener('click', upgradeBest);
+  $('#layLowBtn').addEventListener('click', layLow);
+  $('#trainBtn').addEventListener('click', trainLeader);
   $('#clearLogBtn').addEventListener('click', () => {
     state.log = [];
+    save(true);
     renderLog();
-    saveState(true);
+  });
+  $('#applyMcBtn').addEventListener('click', applyMcEdit);
+  $('#openMcEditorBtn').addEventListener('click', () => switchScreen('mc'));
+  $('#createClubBtn').addEventListener('click', createClub);
+
+  ['setupClubName', 'setupPatchText', 'setupEmblem', 'setupVest', 'setupTrim'].forEach((id) => {
+    $(`#${id}`).addEventListener('input', updateSetupPreview);
+    $(`#${id}`).addEventListener('change', updateSetupPreview);
+  });
+
+  window.addEventListener('beforeunload', () => save(true));
+
+  let secret = '';
+  window.addEventListener('keydown', (event) => {
+    secret += event.key.toLowerCase();
+    secret = secret.slice(-8);
+    if (secret === 'resetapp') {
+      resetSave();
+      toast('Spielstand zurückgesetzt.');
+    }
   });
 }
 
-function startGame() {
-  applyOfflineProgress();
-  bindEvents();
-  renderAll();
-  setInterval(() => tick(), TICK_MS);
-  setInterval(() => renderMissions(), 1000);
-  window.addEventListener('beforeunload', () => saveState(true));
+function gameLoop() {
+  tick();
+  renderStats();
+  renderBuildings();
+  renderRuns();
+  if (Math.random() < 0.018) {
+    raiseFactionPressure(0.25);
+  }
 }
 
-startGame();
+function boot() {
+  state = load();
+  tick();
+  bindEvents();
+  updateSetupPreview();
+  renderAll(true);
+  setInterval(gameLoop, TICK_MS);
+  setInterval(() => save(true), 15000);
+
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+
+  showDialog('Neue bessere Version', 'Diese Version ist mobile-first, zeigt jedes Gebäude mit Level 0/20 bis 20/20, hat prozentuale Gewinnsteigerung, MC-Gründung, Kutten-Editor, Crew, Runs, Geldlager und Stadt-Druck.');
+}
+
+boot();
