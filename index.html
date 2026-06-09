@@ -3,151 +3,272 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#151111" />
-  <title>Road Charter: Block Empire</title>
+  <meta name="theme-color" content="#130d0d" />
+  <meta name="description" content="Road Charter Empire - mobile Aufbau-Strategie-Spiel mit MC, Crew, Gebäuden, Fraktionen und Runs." />
+  <title>Road Charter Empire</title>
   <link rel="manifest" href="manifest.json" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div id="app" class="app-shell">
-    <header class="topbar">
-      <div class="brand">
-        <div class="brand-mark">RC</div>
+  <div class="city-bg" aria-hidden="true"></div>
+
+  <div id="setupOverlay" class="setup-overlay" hidden>
+    <section class="setup-card">
+      <div class="setup-top">
+        <div class="brand-badge">RC</div>
         <div>
-          <h1>Road Charter</h1>
-          <p>Block Empire</p>
+          <p class="eyebrow">Neues MC-Spiel</p>
+          <h1>Road Charter Empire</h1>
+          <p class="muted">Gründe deinen MC, wähle die Kutte und baue deine Blöcke bis Level 20 aus.</p>
         </div>
       </div>
-      <button id="saveBtn" class="ghost-btn" type="button">Speichern</button>
+
+      <div class="setup-grid">
+        <label>
+          <span>MC Name</span>
+          <input id="setupClubName" maxlength="28" value="Iron Wolves MC" />
+        </label>
+        <label>
+          <span>Dein Name</span>
+          <input id="setupLeaderName" maxlength="24" value="Road Captain" />
+        </label>
+        <label>
+          <span>Kutten-Patch</span>
+          <input id="setupPatchText" maxlength="14" value="WOLVES" />
+        </label>
+        <label>
+          <span>Emblem</span>
+          <select id="setupEmblem">
+            <option value="wolf">Wolf</option>
+            <option value="skull">Skull</option>
+            <option value="eagle">Adler</option>
+            <option value="wheel">Rad</option>
+            <option value="flame">Flamme</option>
+          </select>
+        </label>
+        <label>
+          <span>Kutten-Farbe</span>
+          <select id="setupVest">
+            <option value="black">Schwarz</option>
+            <option value="charcoal">Dunkelgrau</option>
+            <option value="brown">Lederbraun</option>
+            <option value="blue">Nachtblau</option>
+          </select>
+        </label>
+        <label>
+          <span>Patch-Rand</span>
+          <select id="setupTrim">
+            <option value="red">Rot</option>
+            <option value="gold">Gold</option>
+            <option value="steel">Stahl</option>
+            <option value="green">Grün</option>
+            <option value="blue">Blau</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="setup-preview">
+        <div id="setupKuttePreview" class="kutte-preview vest-black trim-red emblem-wolf">
+          <div class="top-rocker">IRON</div>
+          <div class="emblem">🐺</div>
+          <div class="bottom-rocker">WOLVES</div>
+        </div>
+        <div>
+          <h3>Spielprinzip</h3>
+          <p class="muted">Jedes normale Gebäude geht bis Level 20. Mit jedem Level steigt der Gewinn prozentual. Geldlager bestimmt, wie viel Cash du maximal halten kannst.</p>
+        </div>
+      </div>
+
+      <button id="createClubBtn" class="btn btn-primary btn-full" type="button">MC gründen und starten</button>
+    </section>
+  </div>
+
+  <div id="toast" class="toast" aria-live="polite"></div>
+
+  <div id="app" class="app-shell">
+    <header class="app-header">
+      <div class="brand-row">
+        <div class="brand-badge">RC</div>
+        <div>
+          <p class="eyebrow">Road Charter Empire</p>
+          <h1 id="clubTitle">Iron Wolves MC</h1>
+        </div>
+      </div>
+      <button id="saveBtn" class="icon-btn" type="button" title="Speichern">💾</button>
     </header>
 
-    <section class="hero-panel">
-      <div>
-        <span class="eyebrow">Dein Charter</span>
-        <h2 id="clubName">Iron Wolves Charter</h2>
-        <p id="clubSubtitle">Bau deine Blöcke aus, halte den Druck niedrig und erweitere deine Crew.</p>
+    <section class="hero-card">
+      <div class="hero-left">
+        <div id="heroKutte" class="kutte-preview small vest-black trim-red emblem-wolf">
+          <div class="top-rocker">IRON</div>
+          <div class="emblem">🐺</div>
+          <div class="bottom-rocker">WOLVES</div>
+        </div>
+        <div>
+          <p class="eyebrow">Dein Charter</p>
+          <h2 id="clubNameHero">Iron Wolves MC</h2>
+          <p id="leaderLine" class="muted">President: Road Captain</p>
+        </div>
       </div>
       <div class="hero-actions">
-        <button id="collectBtn" class="primary-btn" type="button">Einnahmen einsammeln</button>
-        <button id="renameBtn" class="secondary-btn" type="button">Namen ändern</button>
+        <button id="collectAllBtn" class="btn btn-primary" type="button">Einnahmen einsammeln</button>
+        <button id="openMcEditorBtn" class="btn btn-ghost" type="button">MC bearbeiten</button>
       </div>
     </section>
 
-    <section class="resource-grid" aria-label="Ressourcen">
-      <article class="resource-card cash">
-        <span>Geld</span>
+    <section class="stats-strip" aria-label="Ressourcen">
+      <article class="stat-card cash">
+        <span>Cash</span>
         <strong id="cashValue">0 $</strong>
-        <small id="cashCap">Lager: 0 $</small>
+        <small id="cashCapValue">Lager 0 $</small>
       </article>
-      <article class="resource-card">
+      <article class="stat-card">
+        <span>Einnahmen</span>
+        <strong id="incomeValue">0 $/min</strong>
+        <small id="storedValue">0 $ bereit</small>
+      </article>
+      <article class="stat-card">
         <span>Respekt</span>
         <strong id="respectValue">0</strong>
-        <small>Für Crew & Upgrades</small>
+        <small id="respectGainValue">+0/min</small>
       </article>
-      <article class="resource-card">
+      <article class="stat-card">
         <span>Crew</span>
-        <strong id="crewValue">0 / 0</strong>
-        <small id="powerValue">Power: 0</small>
+        <strong id="crewValue">0/0</strong>
+        <small id="powerValue">Power 0</small>
       </article>
-      <article class="resource-card heat">
+      <article class="stat-card heat">
         <span>Heat</span>
         <strong id="heatValue">0%</strong>
-        <small id="pressureValue">Druck: niedrig</small>
+        <small id="dangerValue">Druck niedrig</small>
       </article>
     </section>
 
-    <nav class="tabbar" aria-label="Navigation">
-      <button class="tab active" type="button" data-tab="district">Blöcke</button>
-      <button class="tab" type="button" data-tab="crew">Crew</button>
-      <button class="tab" type="button" data-tab="missions">Runs</button>
-      <button class="tab" type="button" data-tab="factions">Fraktionen</button>
-      <button class="tab" type="button" data-tab="profile">Charakter</button>
-    </nav>
-
-    <main>
-      <section id="district" class="screen active-screen">
-        <div class="section-heading">
+    <main class="main-panel">
+      <section id="screen-base" class="screen active-screen">
+        <div class="section-head">
           <div>
-            <span class="eyebrow">Basebuilding</span>
-            <h3>Charter-Blocks</h3>
+            <p class="eyebrow">Basebuilding</p>
+            <h2>Clubhouse & Stadt-Blöcke</h2>
           </div>
-          <button id="upgradeCheapestBtn" class="mini-btn" type="button">Günstigstes Upgrade</button>
+          <button id="upgradeBestBtn" class="btn btn-small" type="button">Bestes Upgrade</button>
         </div>
+        <div class="tip-card">Normale Gebäude gehen bis <b>Level 20</b>. Jeder Ausbau erhöht den Gewinn prozentual stärker, ähnlich wie in Aufbau-Strategiespielen.</div>
         <div id="buildingGrid" class="building-grid"></div>
       </section>
 
-      <section id="crew" class="screen">
-        <div class="section-heading">
+      <section id="screen-crew" class="screen">
+        <div class="section-head">
           <div>
-            <span class="eyebrow">Nomads & Member</span>
-            <h3>Crew aufbauen</h3>
+            <p class="eyebrow">Nomads & Member</p>
+            <h2>Crew aufbauen</h2>
           </div>
         </div>
-        <div id="unitGrid" class="unit-grid"></div>
+        <div class="tip-card">Mehr Crew bringt mehr Power für Runs. Clubhouse und Nomad Camp erhöhen dein Crew-Limit.</div>
+        <div id="crewGrid" class="crew-grid"></div>
       </section>
 
-      <section id="missions" class="screen">
-        <div class="section-heading">
+      <section id="screen-runs" class="screen">
+        <div class="section-head">
           <div>
-            <span class="eyebrow">PvE-Prototyp</span>
-            <h3>Runs & Block-Kontrolle</h3>
+            <p class="eyebrow">PvE-Prototyp</p>
+            <h2>Runs & Block-Kontrolle</h2>
           </div>
         </div>
-        <div class="mission-tip">
-          Runs sind rein fiktive Spielmissionen. Mehr Crew-Power erhöht die Erfolgschance, mehr Heat erhöht das Risiko.
-        </div>
-        <div id="missionGrid" class="mission-grid"></div>
+        <div class="tip-card">Runs sind rein fiktive Spielmissionen. Viel Crew-Power erhöht die Chance, Heat und Fraktionsdruck senken sie.</div>
+        <div id="runGrid" class="run-grid"></div>
       </section>
 
-      <section id="factions" class="screen">
-        <div class="section-heading">
+      <section id="screen-factions" class="screen">
+        <div class="section-head">
           <div>
-            <span class="eyebrow">Stadt-Druck</span>
-            <h3>Behörden & Rivalen beruhigen</h3>
+            <p class="eyebrow">Stadt-Druck</p>
+            <h2>Polizei, ATF, FBI & Rivalen</h2>
           </div>
-          <button id="cooldownBtn" class="mini-btn" type="button">Heat abbauen</button>
+          <button id="layLowBtn" class="btn btn-small" type="button">Unauffällig bleiben</button>
         </div>
+        <div class="tip-card">Wenn der Druck steigt, werden Runs schwerer. Du kannst Kontakte pflegen, zahlen oder Zeit investieren, um Druck zu senken.</div>
         <div id="factionGrid" class="faction-grid"></div>
       </section>
 
-      <section id="profile" class="screen">
-        <div class="section-heading">
+      <section id="screen-mc" class="screen">
+        <div class="section-head">
           <div>
-            <span class="eyebrow">RPG-System</span>
-            <h3>Charakter & Bike</h3>
+            <p class="eyebrow">MC Verwaltung</p>
+            <h2>Club, Kutte & Patch</h2>
           </div>
         </div>
-        <div class="profile-layout">
-          <div class="avatar-card">
-            <div class="avatar">🏍️</div>
-            <h3 id="leaderName">Road Captain</h3>
-            <p id="leaderStats">Level 1 · Einfluss 0</p>
-            <button id="trainLeaderBtn" class="primary-btn full" type="button">Charakter trainieren</button>
+        <div class="mc-layout">
+          <div id="mcKutteBig" class="kutte-preview big vest-black trim-red emblem-wolf">
+            <div class="top-rocker">IRON</div>
+            <div class="emblem">🐺</div>
+            <div class="bottom-rocker">WOLVES</div>
           </div>
+          <div class="editor-card">
+            <label><span>MC Name</span><input id="editClubName" maxlength="28" /></label>
+            <label><span>President/Charakter</span><input id="editLeaderName" maxlength="24" /></label>
+            <label><span>Patch Text</span><input id="editPatchText" maxlength="14" /></label>
+            <div class="two-col">
+              <label><span>Emblem</span><select id="editEmblem"></select></label>
+              <label><span>Kutte</span><select id="editVest"></select></label>
+              <label><span>Rand</span><select id="editTrim"></select></label>
+              <label><span>MC Rang</span><select id="editRank"><option>President</option><option>Vice President</option><option>Nomad</option><option>Road Captain</option></select></label>
+            </div>
+            <button id="applyMcBtn" class="btn btn-primary btn-full" type="button">Änderungen speichern</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="screen-profile" class="screen">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">RPG</p>
+            <h2>Charakter, Bike & Perks</h2>
+          </div>
+        </div>
+        <div class="profile-grid">
+          <article class="profile-card">
+            <div class="profile-avatar">🏍️</div>
+            <h3 id="profileName">Road Captain</h3>
+            <p id="profileStats" class="muted">Level 1 · Einfluss 0</p>
+            <button id="trainBtn" class="btn btn-primary btn-full" type="button">Charakter trainieren</button>
+          </article>
           <div id="perkGrid" class="perk-grid"></div>
         </div>
       </section>
     </main>
 
-    <section class="event-log">
-      <div class="section-heading compact">
-        <h3>Logbuch</h3>
-        <button id="clearLogBtn" class="mini-btn" type="button">Leeren</button>
+    <section class="log-panel">
+      <div class="section-head compact">
+        <div>
+          <p class="eyebrow">Live Log</p>
+          <h2>Club-Protokoll</h2>
+        </div>
+        <button id="clearLogBtn" class="btn btn-small" type="button">Leeren</button>
       </div>
       <div id="logList" class="log-list"></div>
     </section>
+
+    <nav class="bottom-nav" aria-label="Hauptnavigation">
+      <button class="nav-btn active" data-screen="base" type="button"><span>🏚️</span>Base</button>
+      <button class="nav-btn" data-screen="crew" type="button"><span>👥</span>Crew</button>
+      <button class="nav-btn" data-screen="runs" type="button"><span>🛣️</span>Runs</button>
+      <button class="nav-btn" data-screen="factions" type="button"><span>🚨</span>Druck</button>
+      <button class="nav-btn" data-screen="mc" type="button"><span>🧥</span>MC</button>
+      <button class="nav-btn" data-screen="profile" type="button"><span>⭐</span>RPG</button>
+    </nav>
   </div>
 
-  <dialog id="modal" class="game-modal">
+  <dialog id="confirmDialog" class="dialog">
     <form method="dialog">
-      <h3 id="modalTitle">Hinweis</h3>
-      <p id="modalText">Text</p>
+      <h3 id="dialogTitle">Hinweis</h3>
+      <p id="dialogText">Text</p>
       <menu>
-        <button class="primary-btn" value="ok">OK</button>
+        <button class="btn btn-primary" value="ok">OK</button>
       </menu>
     </form>
   </dialog>
 
-  <script src="app.js"></script>
+  <script src="app.js" defer></script>
 </body>
 </html>
