@@ -25,6 +25,15 @@
 
 * { box-sizing: border-box; }
 
+/* Wichtig: author CSS darf das HTML-hidden-Attribut nicht überschreiben.
+   Ohne diese Regel bleibt das MC-Gründungsfenster sichtbar. */
+[hidden],
+.setup-overlay[hidden],
+.setup-overlay.is-hidden {
+  display: none !important;
+}
+
+
 html {
   min-height: 100%;
   background: var(--bg);
