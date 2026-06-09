@@ -1,19 +1,19 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="de">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#130d0d" />
-  <meta name="description" content="Road Charter Empire - mobile Aufbau-Strategie-Spiel mit MC, Crew, Gebäuden, Fraktionen und Runs." />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#130d0d">
+  <meta name="description" content="Road Charter Empire - Mobile Aufbau-Strategiespiel mit MC, Crew, Gebäuden, Fraktionen und Runs.">
   <title>Road Charter Empire</title>
-  <link rel="manifest" href="manifest.json" />
-  <link rel="stylesheet" href="style.css?v=3" />
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
   <div class="city-bg" aria-hidden="true"></div>
 
   <div id="setupOverlay" class="setup-overlay" hidden>
-    <section class="setup-card">
+    <section class="setup-card" aria-label="MC gründen">
       <div class="setup-top">
         <div class="brand-badge">RC</div>
         <div>
@@ -24,19 +24,22 @@
       </div>
 
       <div class="setup-grid">
-        <label>
+        <label for="setupClubName">
           <span>MC Name</span>
-          <input id="setupClubName" maxlength="28" value="Iron Wolves MC" />
+          <input id="setupClubName" type="text" maxlength="28" value="Iron Wolves MC" autocomplete="off">
         </label>
-        <label>
+
+        <label for="setupLeaderName">
           <span>Dein Name</span>
-          <input id="setupLeaderName" maxlength="24" value="Road Captain" />
+          <input id="setupLeaderName" type="text" maxlength="24" value="Road Captain" autocomplete="off">
         </label>
-        <label>
+
+        <label for="setupPatchText">
           <span>Kutten-Patch</span>
-          <input id="setupPatchText" maxlength="14" value="WOLVES" />
+          <input id="setupPatchText" type="text" maxlength="14" value="WOLVES" autocomplete="off">
         </label>
-        <label>
+
+        <label for="setupEmblem">
           <span>Emblem</span>
           <select id="setupEmblem">
             <option value="wolf">Wolf</option>
@@ -46,7 +49,8 @@
             <option value="flame">Flamme</option>
           </select>
         </label>
-        <label>
+
+        <label for="setupVest">
           <span>Kutten-Farbe</span>
           <select id="setupVest">
             <option value="black">Schwarz</option>
@@ -55,7 +59,8 @@
             <option value="blue">Nachtblau</option>
           </select>
         </label>
-        <label>
+
+        <label for="setupTrim">
           <span>Patch-Rand</span>
           <select id="setupTrim">
             <option value="red">Rot</option>
@@ -75,7 +80,7 @@
         </div>
         <div>
           <h3>Spielprinzip</h3>
-          <p class="muted">Jedes normale Gebäude geht bis Level 20. Mit jedem Level steigt der Gewinn prozentual. Geldlager bestimmt, wie viel Cash du maximal halten kannst.</p>
+          <p class="muted">Jedes normale Gebäude geht bis Level 20. Mit jedem Level steigt der Gewinn prozentual. Das Geldlager bestimmt, wie viel Cash du maximal halten kannst.</p>
         </div>
       </div>
 
@@ -94,7 +99,7 @@
           <h1 id="clubTitle">Iron Wolves MC</h1>
         </div>
       </div>
-      <button id="saveBtn" class="icon-btn" type="button" title="Speichern">💾</button>
+      <button id="saveBtn" class="icon-btn" type="button" title="Speichern" aria-label="Speichern">💾</button>
     </header>
 
     <section class="hero-card">
@@ -153,7 +158,7 @@
           </div>
           <button id="upgradeBestBtn" class="btn btn-small" type="button">Bestes Upgrade</button>
         </div>
-        <div class="tip-card">Normale Gebäude gehen bis <b>Level 20</b>. Jeder Ausbau erhöht den Gewinn prozentual stärker, ähnlich wie in Aufbau-Strategiespielen.</div>
+        <div class="tip-card">Normale Gebäude gehen bis <strong>Level 20</strong>. Jeder Ausbau erhöht den Gewinn prozentual stärker.</div>
         <div id="buildingGrid" class="building-grid"></div>
       </section>
 
@@ -175,7 +180,7 @@
             <h2>Runs & Block-Kontrolle</h2>
           </div>
         </div>
-        <div class="tip-card">Runs sind rein fiktive Spielmissionen. Viel Crew-Power erhöht die Chance, Heat und Fraktionsdruck senken sie.</div>
+        <div class="tip-card">Runs sind fiktive Spielmissionen. Crew-Power erhöht die Chance, Heat und Fraktionsdruck senken sie.</div>
         <div id="runGrid" class="run-grid"></div>
       </section>
 
@@ -187,7 +192,7 @@
           </div>
           <button id="layLowBtn" class="btn btn-small" type="button">Unauffällig bleiben</button>
         </div>
-        <div class="tip-card">Wenn der Druck steigt, werden Runs schwerer. Du kannst Kontakte pflegen, zahlen oder Zeit investieren, um Druck zu senken.</div>
+        <div class="tip-card">Wenn der Druck steigt, werden Runs schwerer. Du kannst Kontakte pflegen oder Zeit investieren, um Druck zu senken.</div>
         <div id="factionGrid" class="faction-grid"></div>
       </section>
 
@@ -205,14 +210,14 @@
             <div class="bottom-rocker">WOLVES</div>
           </div>
           <div class="editor-card">
-            <label><span>MC Name</span><input id="editClubName" maxlength="28" /></label>
-            <label><span>President/Charakter</span><input id="editLeaderName" maxlength="24" /></label>
-            <label><span>Patch Text</span><input id="editPatchText" maxlength="14" /></label>
+            <label for="editClubName"><span>MC Name</span><input id="editClubName" type="text" maxlength="28" autocomplete="off"></label>
+            <label for="editLeaderName"><span>President/Charakter</span><input id="editLeaderName" type="text" maxlength="24" autocomplete="off"></label>
+            <label for="editPatchText"><span>Patch Text</span><input id="editPatchText" type="text" maxlength="14" autocomplete="off"></label>
             <div class="two-col">
-              <label><span>Emblem</span><select id="editEmblem"></select></label>
-              <label><span>Kutte</span><select id="editVest"></select></label>
-              <label><span>Rand</span><select id="editTrim"></select></label>
-              <label><span>MC Rang</span><select id="editRank"><option>President</option><option>Vice President</option><option>Nomad</option><option>Road Captain</option></select></label>
+              <label for="editEmblem"><span>Emblem</span><select id="editEmblem"></select></label>
+              <label for="editVest"><span>Kutte</span><select id="editVest"></select></label>
+              <label for="editTrim"><span>Rand</span><select id="editTrim"></select></label>
+              <label for="editRank"><span>MC Rang</span><select id="editRank"><option>President</option><option>Vice President</option><option>Nomad</option><option>Road Captain</option></select></label>
             </div>
             <button id="applyMcBtn" class="btn btn-primary btn-full" type="button">Änderungen speichern</button>
           </div>
@@ -263,12 +268,13 @@
     <form method="dialog">
       <h3 id="dialogTitle">Hinweis</h3>
       <p id="dialogText">Text</p>
-      <menu>
-        <button class="btn btn-primary" value="ok">OK</button>
-      </menu>
+      <div class="dialog-actions">
+        <button class="btn btn-primary" type="submit" value="ok">OK</button>
+      </div>
     </form>
   </dialog>
 
-  <script src="app.js?v=3" defer></script>
+  <noscript>Bitte JavaScript aktivieren, damit Road Charter Empire läuft.</noscript>
+  <script src="app.js?v=4" defer></script>
 </body>
 </html>
