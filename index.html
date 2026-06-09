@@ -1,237 +1,153 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="de">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport"
-        content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <title>Multi Slot System</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#151111" />
+  <title>Road Charter: Block Empire</title>
+  <link rel="manifest" href="manifest.json" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-
-  <header class="topbar">
-    <div class="brand">
-      <div class="logoBadge">S</div>
-      <div class="brandText">
-        <div class="title">Multi Slot System</div>
-        <div class="sub">5×3 · 10 Linien · Quick-Stop · Mobile</div>
-      </div>
-    </div>
-
-    <div class="topActions">
-      <button id="wheelBtn" class="btn topBtn">Daily Wheel</button>
-      <button id="soundBtn" class="btn topBtn">Sound: AN</button>
-    </div>
-
-    <div class="topInfo">
-      <div class="hint">
-        Admin: <span class="kbd">STRG</span> + <span class="kbd">ALT</span> + <span class="kbd">#</span>
-      </div>
-      <div class="hint2" id="wheelCooldownText">Wheel: bereit</div>
-    </div>
-  </header>
-
-  <main class="main">
-    <section class="panel slotPanel">
-      <div class="panelHeader">
-        <div class="panelTitle">Slot</div>
-        <div class="panelMeta" id="slotMeta">—</div>
-      </div>
-
-      <div class="slotSelectRow">
-        <select id="slotSelect" class="select"></select>
-      </div>
-
-      <div class="boardWrap">
-        <div id="baseBoard" class="board"></div>
-      </div>
-
-      <!-- Controls: kein Scroll, alles im View -->
-      <div class="controls">
-        <div class="controlsTop">
-          <button id="spinBtn" class="btn primary bigBtn">SPIN</button>
-
-          <div id="midMsg" class="midMsg">
-            <div class="midMain">Bereit</div>
-            <div class="midSub">Tippe SPIN</div>
-          </div>
-
-          <button id="autoBtn" class="btn bigBtn">AUTO: AUS</button>
+  <div id="app" class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">RC</div>
+        <div>
+          <h1>Road Charter</h1>
+          <p>Block Empire</p>
         </div>
+      </div>
+      <button id="saveBtn" class="ghost-btn" type="button">Speichern</button>
+    </header>
 
-        <div class="controlsBottom">
-          <div class="betWrap">
-            <div class="smallLabel">Einsatz</div>
-            <select id="betSelect" class="select"></select>
-          </div>
-
-          <div class="balWrap">
-            <div class="smallLabel">Balance</div>
-            <div id="balanceBottom" class="balanceBottom">€0.00</div>
-          </div>
-        </div>
+    <section class="hero-panel">
+      <div>
+        <span class="eyebrow">Dein Charter</span>
+        <h2 id="clubName">Iron Wolves Charter</h2>
+        <p id="clubSubtitle">Bau deine Blöcke aus, halte den Druck niedrig und erweitere deine Crew.</p>
+      </div>
+      <div class="hero-actions">
+        <button id="collectBtn" class="primary-btn" type="button">Einnahmen einsammeln</button>
+        <button id="renameBtn" class="secondary-btn" type="button">Namen ändern</button>
       </div>
     </section>
-  </main>
 
-  <!-- POWER: Kaufen Modal -->
-  <div class="modalOverlay hidden" id="powerModalOverlay">
-    <div class="modal">
-      <div class="modalHeader">
-        <div class="modalTitle">Power-Spins verfügbar</div>
-        <button class="iconBtn" id="closePowerModal" aria-label="close">✕</button>
-      </div>
-      <div class="modalBody">
-        <p id="powerModalText" class="modalText">—</p>
+    <section class="resource-grid" aria-label="Ressourcen">
+      <article class="resource-card cash">
+        <span>Geld</span>
+        <strong id="cashValue">0 $</strong>
+        <small id="cashCap">Lager: 0 $</small>
+      </article>
+      <article class="resource-card">
+        <span>Respekt</span>
+        <strong id="respectValue">0</strong>
+        <small>Für Crew & Upgrades</small>
+      </article>
+      <article class="resource-card">
+        <span>Crew</span>
+        <strong id="crewValue">0 / 0</strong>
+        <small id="powerValue">Power: 0</small>
+      </article>
+      <article class="resource-card heat">
+        <span>Heat</span>
+        <strong id="heatValue">0%</strong>
+        <small id="pressureValue">Druck: niedrig</small>
+      </article>
+    </section>
 
-        <label class="field">
-          <span>Power-Spins kaufen</span>
-          <input type="range" min="1" max="1" value="1" id="powerBuyRange" />
-          <div class="rangeMeta">
-            <span id="powerBuySpins">1 Spin</span>
-            <span id="powerBuyCost">€0.00</span>
+    <nav class="tabbar" aria-label="Navigation">
+      <button class="tab active" type="button" data-tab="district">Blöcke</button>
+      <button class="tab" type="button" data-tab="crew">Crew</button>
+      <button class="tab" type="button" data-tab="missions">Runs</button>
+      <button class="tab" type="button" data-tab="factions">Fraktionen</button>
+      <button class="tab" type="button" data-tab="profile">Charakter</button>
+    </nav>
+
+    <main>
+      <section id="district" class="screen active-screen">
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">Basebuilding</span>
+            <h3>Charter-Blocks</h3>
           </div>
-        </label>
-
-        <div class="modalActions">
-          <button class="btn" id="takeWinBtn">Gewinn nehmen</button>
-          <button class="btn primary" id="buyPowerBtn">Power-Spins starten</button>
+          <button id="upgradeCheapestBtn" class="mini-btn" type="button">Günstigstes Upgrade</button>
         </div>
-      </div>
-    </div>
-  </div>
+        <div id="buildingGrid" class="building-grid"></div>
+      </section>
 
-  <!-- POWER: Spiel Overlay (separates Feld, nicht unter Slot) -->
-  <div class="modalOverlay hidden" id="powerPlayOverlay">
-    <div class="powerPlay">
-      <div class="powerTop">
-        <button id="powerStopBtn" class="btn">STOP</button>
-
-        <div class="powerCount">
-          Power-Spins: <span id="powerSpinsLeft">0</span>
-        </div>
-
-        <button id="powerCloseBtn" class="iconBtn" aria-label="close">✕</button>
-      </div>
-
-      <div class="powerBoards">
-        <div class="miniBoardWrap">
-          <div class="miniLabel">Feld 1</div>
-          <div id="pBoard1" class="board mini"></div>
-        </div>
-        <div class="miniBoardWrap">
-          <div class="miniLabel">Feld 2</div>
-          <div id="pBoard2" class="board mini"></div>
-        </div>
-        <div class="miniBoardWrap">
-          <div class="miniLabel">Feld 3</div>
-          <div id="pBoard3" class="board mini"></div>
-        </div>
-        <div class="miniBoardWrap">
-          <div class="miniLabel">Feld 4</div>
-          <div id="pBoard4" class="board mini"></div>
-        </div>
-      </div>
-
-      <div class="powerBottom">
-        <div class="powerStat">
-          <div class="smallLabel">Spin-Gewinn</div>
-          <div id="powerSpinWin" class="powerValue">€0.00</div>
-        </div>
-        <div class="powerStat">
-          <div class="smallLabel">Power-Total</div>
-          <div id="powerTotalWin" class="powerValue good">€0.00</div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- DAILY WHEEL -->
-  <div class="modalOverlay hidden" id="wheelModalOverlay">
-    <div class="modal">
-      <div class="modalHeader">
-        <div class="modalTitle">Daily Wheel (24h)</div>
-        <button class="iconBtn" id="closeWheelModal" aria-label="close">✕</button>
-      </div>
-      <div class="modalBody">
-        <p class="modalText" id="wheelInfo">Dreh am Rad und gewinne €10 bis €100.</p>
-
-        <div class="wheelWrap">
-          <div class="wheel" id="wheel">
-            <div class="wheelCenter">€</div>
-          </div>
-          <div class="wheelPointer" aria-hidden="true"></div>
-        </div>
-
-        <div class="modalActions">
-          <button class="btn primary" id="spinWheelBtn">Wheel drehen</button>
-        </div>
-
-        <div class="smallNote" id="wheelReadyText">—</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ADMIN / BUILDER -->
-  <div class="modalOverlay hidden" id="adminOverlay">
-    <div class="modal wide">
-      <div class="modalHeader">
-        <div class="modalTitle">Admin / Builder</div>
-        <button class="iconBtn" id="closeAdmin" aria-label="close">✕</button>
-      </div>
-
-      <div class="modalBody">
-        <div class="adminGrid">
-          <div class="cardBox">
-            <div class="cardTitle">Admin Aktionen</div>
-
-            <label class="field">
-              <span>Balance setzen (€)</span>
-              <input id="adminBalanceInput" type="number" min="0" step="0.01" />
-            </label>
-
-            <div class="row">
-              <button class="btn" id="adminSetBalanceBtn">Balance übernehmen</button>
-              <button class="btn" id="adminResetWheelBtn">Wheel Cooldown reset</button>
-            </div>
-
-            <div class="row">
-              <button class="btn" id="adminExportDataBtn">Export Save (JSON)</button>
-              <button class="btn danger" id="adminResetAllBtn">ALLES zurücksetzen</button>
-            </div>
-          </div>
-
-          <div class="cardBox">
-            <div class="cardTitle">Builder Modus (Slots)</div>
-
-            <div class="row">
-              <button class="btn" id="builderNewBtn">Neuer Slot</button>
-              <button class="btn" id="builderCloneBtn">Slot klonen</button>
-              <button class="btn danger" id="builderDeleteBtn">Custom Slot löschen</button>
-            </div>
-
-            <label class="field">
-              <span>Slot auswählen</span>
-              <select id="builderSlotSelect" class="select"></select>
-            </label>
-
-            <label class="field">
-              <span>Slot Config (JSON)</span>
-              <textarea id="builderJson" class="textarea" rows="14" spellcheck="false"></textarea>
-            </label>
-
-            <div class="row">
-              <button class="btn primary" id="builderSaveBtn">Validieren & Speichern</button>
-              <button class="btn" id="builderExportSlotBtn">Slot Export</button>
-              <button class="btn" id="builderImportSlotBtn">Slot Import</button>
-            </div>
+      <section id="crew" class="screen">
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">Nomads & Member</span>
+            <h3>Crew aufbauen</h3>
           </div>
         </div>
+        <div id="unitGrid" class="unit-grid"></div>
+      </section>
+
+      <section id="missions" class="screen">
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">PvE-Prototyp</span>
+            <h3>Runs & Block-Kontrolle</h3>
+          </div>
+        </div>
+        <div class="mission-tip">
+          Runs sind rein fiktive Spielmissionen. Mehr Crew-Power erhöht die Erfolgschance, mehr Heat erhöht das Risiko.
+        </div>
+        <div id="missionGrid" class="mission-grid"></div>
+      </section>
+
+      <section id="factions" class="screen">
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">Stadt-Druck</span>
+            <h3>Behörden & Rivalen beruhigen</h3>
+          </div>
+          <button id="cooldownBtn" class="mini-btn" type="button">Heat abbauen</button>
+        </div>
+        <div id="factionGrid" class="faction-grid"></div>
+      </section>
+
+      <section id="profile" class="screen">
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">RPG-System</span>
+            <h3>Charakter & Bike</h3>
+          </div>
+        </div>
+        <div class="profile-layout">
+          <div class="avatar-card">
+            <div class="avatar">🏍️</div>
+            <h3 id="leaderName">Road Captain</h3>
+            <p id="leaderStats">Level 1 · Einfluss 0</p>
+            <button id="trainLeaderBtn" class="primary-btn full" type="button">Charakter trainieren</button>
+          </div>
+          <div id="perkGrid" class="perk-grid"></div>
+        </div>
+      </section>
+    </main>
+
+    <section class="event-log">
+      <div class="section-heading compact">
+        <h3>Logbuch</h3>
+        <button id="clearLogBtn" class="mini-btn" type="button">Leeren</button>
       </div>
-    </div>
+      <div id="logList" class="log-list"></div>
+    </section>
   </div>
 
-  <!-- Cache-Buster für GitHub Pages -->
-  <script src="app.js?v=20260226_4"></script>
+  <dialog id="modal" class="game-modal">
+    <form method="dialog">
+      <h3 id="modalTitle">Hinweis</h3>
+      <p id="modalText">Text</p>
+      <menu>
+        <button class="primary-btn" value="ok">OK</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
 </body>
 </html>
