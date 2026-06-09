@@ -866,7 +866,13 @@ function renderAll(force = false) {
 }
 
 function renderSetup() {
-  $('#setupOverlay').hidden = !!state.setupDone;
+  const overlay = $('#setupOverlay');
+  if (!overlay) return;
+  const hide = !!state.setupDone;
+  overlay.hidden = hide;
+  overlay.classList.toggle('is-hidden', hide);
+  overlay.setAttribute('aria-hidden', hide ? 'true' : 'false');
+  overlay.style.display = hide ? 'none' : 'grid';
 }
 
 function renderHeader() {
@@ -1139,6 +1145,13 @@ function createClub() {
   state.vest = $('#setupVest').value;
   state.trim = $('#setupTrim').value;
   state.setupDone = true;
+  const overlay = $('#setupOverlay');
+  if (overlay) {
+    overlay.hidden = true;
+    overlay.classList.add('is-hidden');
+    overlay.setAttribute('aria-hidden', 'true');
+    overlay.style.display = 'none';
+  }
   addLog(`${state.clubName} wurde gegründet. Kutte und Patch sind bereit.`);
   save(true);
   renderAll(true);
@@ -1237,7 +1250,6 @@ function boot() {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
 
-  showDialog('Neue bessere Version', 'Diese Version ist mobile-first, zeigt jedes Gebäude mit Level 0/20 bis 20/20, hat prozentuale Gewinnsteigerung, MC-Gründung, Kutten-Editor, Crew, Runs, Geldlager und Stadt-Druck.');
 }
 
 boot();
